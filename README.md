@@ -160,6 +160,10 @@ curl https://<WEBHOOK_DOMAIN>/health   # -> ok
 Then mention `@<your_bot> hello` in any chat where Guest Mode is allowed (use the
 `BOT_USERNAME` you configured in `.env`).
 
+Send `@<your_bot> /clear` to reset your own conversation context in that chat; the
+bot confirms and the next message starts fresh. The reset is per-user, per-chat —
+it only clears your history, not other participants'.
+
 ## Architecture
 
 `Telegram → Caddy (443, TLS) → bot (aiohttp, 8080) → Groq (stream) + SQLite (memory)`
