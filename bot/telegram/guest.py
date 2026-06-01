@@ -22,6 +22,13 @@ class GuestMessage:
 
 
 def parse_guest_message(update: dict) -> GuestMessage | None:
+    """Extract a GuestMessage from a Telegram update.
+
+    ASSUMPTION: the `guest_message` JSON shape (guest_query_id, chat.id,
+    from.id, text, reply_to_message.text) follows Bot API 10.0 and is NOT yet
+    verified against the live API. If the real shape differs, THIS is the only
+    function to change — the rest of the code depends solely on GuestMessage.
+    """
     gm = update.get("guest_message")
     if not gm:
         return None
