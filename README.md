@@ -52,6 +52,104 @@ docker compose logs -f bot
 docker compose logs -f caddy
 ```
 
+## Caddy (HTTPS reverse proxy)
+
+Telegram only delivers webhooks over **HTTPS with a valid certificate**. Caddy handles
+this for you: it obtains and auto-renews a free Let's Encrypt certificate and reverse-proxies
+incoming requests to the bot container.
+
+### Default: Caddy in Docker (nothing to install)
+
+In the default setup you do **not** install Caddy separately — it runs as the `caddy` service
+from [docker-compose.yml](docker-compose.yml) using the official `caddy:2.8-alpine` image.
+`docker compose up -d` pulls and starts it automatically.
+
+How the pieces connect:
+
+- [Caddyfile](Caddyfile) is the entire configuration:
+
+  ```
+  {$WEBHOOK_DOMAIN} {
+      reverse_proxy bot:8080
+  }
+  ```
+
+  `{$WEBHOOK_DOMAIN}` is read from Caddy's environment. Compose injects it from your `.env`
+  (`WEBHOOK_DOMAIN: ${WEBHOOK_DOMAIN}` in the `caddy` service), so the **only** thing you
+  configure is `WEBHOOK_DOMAIN` in `.env`. `bot:8080` is the bot container's name on the
+  internal Docker network — that port is never published to the host.
+
+- The `./caddy_data` volume persists issued certificates. **Keep it** across restarts —
+  deleting it forces re-issuance and can hit Let's Encrypt rate limits.
+
+**Requirements for the certificate to issue successfully:**
+
+1. `WEBHOOK_DOMAIN` (e.g. `bot.example.com`) has a DNS **A-record pointing at the VPS IP**.
+   Check with `dig +short <WEBHOOK_DOMAIN>`.
+2. Ports **80 and 443 are open** in the VPS firewall and not used by another web server
+   (stop any host nginx/apache on those ports first).
+3. The domain is publicly reachable (Let's Encrypt validates from the internet).
+
+Apply config changes (after editing the `Caddyfile`) without downtime:
+
+```bash
+docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+# or simply: docker compose restart caddy
+```
+
+Watch certificate issuance / troubleshoot:
+
+```bash
+docker compose logs -f caddy        # look for "certificate obtained successfully"
+```
+
+Common issues: `WEBHOOK_DOMAIN` unset or still `bot.example.com` → no cert; DNS not pointing
+at the VPS → ACME challenge fails; port 80/443 blocked or already in use → issuance hangs.
+
+### Alternative: native Caddy on the VPS (no Caddy container)
+
+Prefer Caddy installed on the host instead of in Docker? Install it from the official repo
+(Debian/Ubuntu):
+
+```bash
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install -y caddy
+```
+
+(For other systems see https://caddyserver.com/docs/install.) Caddy installs as a systemd
+service. Then make two changes:
+
+1. **Publish the bot to localhost only** so the host Caddy can reach it. In
+   `docker-compose.yml`, remove the `caddy` service and give the `bot` service:
+
+   ```yaml
+   ports:
+     - "127.0.0.1:8080:8080"
+   ```
+
+2. **Configure `/etc/caddy/Caddyfile`** (replace the domain with yours):
+
+   ```
+   bot.example.com {
+       reverse_proxy 127.0.0.1:8080
+   }
+   ```
+
+Then reload and manage Caddy with systemd:
+
+```bash
+sudo systemctl reload caddy     # apply Caddyfile changes
+sudo systemctl status caddy     # check it's running / cert obtained
+sudo journalctl -u caddy -f     # follow logs
+```
+
+With native Caddy, start/stop the bot with `docker compose up -d bot` / `docker compose down`,
+and Caddy runs independently as a system service.
+
 ## Verify
 
 ```bash
