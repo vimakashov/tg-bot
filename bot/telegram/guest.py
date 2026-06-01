@@ -66,6 +66,10 @@ async def handle_guest_message(update: dict, api, ai, store, config) -> None:
     if gm is None:
         return
     user_text = strip_bot_mention(gm.text, config.bot_username)
+    if is_clear_command(user_text):
+        await store.clear(gm.chat_id, gm.user_id)
+        await api.answer_guest_query(gm.query_id, CLEAR_REPLY)
+        return
     history = await store.get_history(gm.chat_id, gm.user_id, config.context_messages)
     messages = build_messages(history, user_text, gm.reply_text, config.system_prompt)
 
