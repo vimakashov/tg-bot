@@ -1,8 +1,9 @@
 from __future__ import annotations
+import logging
 import re
 from dataclasses import dataclass
 
-from bot.streaming import stream_with_throttle
+log = logging.getLogger("brainratbot.guest")
 
 TELEGRAM_MAX = 4096
 SYSTEM_PROMPT = (
@@ -66,15 +67,16 @@ async def handle_guest_message(update: dict, api, ai, store, config) -> None:
     history = await store.get_history(gm.chat_id, gm.user_id, config.context_messages)
     messages = build_messages(history, user_text, gm.reply_text)
 
-    async def on_update(partial: str) -> None:
-        await api.send_message_draft(gm.chat_id, partial[:TELEGRAM_MAX], gm.query_id)
-
+    # Guest mode allows exactly ONE reply, delivered via answerGuestQuery as a
+    # single inline message — there is no per-token draft streaming here
+    # (sendMessageDraft is a private-chat/member-mode feature). So we accumulate
+    # the full Groq response, then answer once.
     try:
-        full = await stream_with_throttle(
-            ai.stream_completion(messages), on_update,
-            min_interval=config.stream_interval,
-        )
+        full = ""
+        async for chunk in ai.stream_completion(messages):
+            full += chunk
     except Exception:
+        log.exception("AI generation failed")
         full = ""
 
     reply = (full[:TELEGRAM_MAX]) if full else FALLBACK_TEXT

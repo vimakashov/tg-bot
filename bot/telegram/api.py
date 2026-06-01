@@ -22,13 +22,24 @@ class TelegramApi:
             raise TelegramError(f"{method} failed: {data.get('description')}")
         return data["result"]
 
-    async def answer_guest_query(self, guest_query_id: str, text: str) -> object:
-        return await self.call("answerGuestQuery", guest_query_id=guest_query_id, text=text)
+    async def answer_guest_query(self, guest_query_id: str, text: str,
+                                 result_id: str = "1") -> object:
+        # Bot API 10.0: answerGuestQuery takes a `result` (InlineQueryResult),
+        # NOT a plain `text`. We wrap the reply as an article whose message body
+        # is an InputTextMessageContent. Returns a SentGuestMessage (with
+        # inline_message_id), which can later be edited via editMessageText.
+        result = {
+            "type": "article",
+            "id": result_id,
+            "title": "brainratbot",
+            "input_message_content": {"message_text": text},
+        }
+        return await self.call("answerGuestQuery",
+                               guest_query_id=guest_query_id, result=result)
 
-    async def send_message_draft(self, chat_id: int, text: str,
-                                 guest_query_id: str | None = None) -> object:
-        return await self.call("sendMessageDraft", chat_id=chat_id, text=text,
-                               guest_query_id=guest_query_id)
+    async def edit_inline_message_text(self, inline_message_id: str, text: str) -> object:
+        return await self.call("editMessageText",
+                               inline_message_id=inline_message_id, text=text)
 
     async def set_webhook(self, url: str, secret_token: str) -> object:
         return await self.call("setWebhook", url=url, secret_token=secret_token,

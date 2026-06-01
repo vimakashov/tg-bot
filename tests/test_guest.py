@@ -69,11 +69,7 @@ class FakeAI:
 
 class FakeApi:
     def __init__(self):
-        self.drafts = []
         self.answers = []
-
-    async def send_message_draft(self, chat_id, text, guest_query_id=None):
-        self.drafts.append((chat_id, text, guest_query_id))
 
     async def answer_guest_query(self, guest_query_id, text):
         self.answers.append((guest_query_id, text))
@@ -85,11 +81,11 @@ class Cfg:
     stream_interval = 0.0
 
 
-async def test_handler_streams_and_finalizes():
+async def test_handler_accumulates_and_answers_once():
     store, ai, api = FakeStore(), FakeAI(["Hel", "lo!"]), FakeApi()
     await handle_guest_message(_update("@brainratbot hi"), api, ai, store, Cfg())
+    # guest mode: exactly one reply with the full concatenated text
     assert api.answers == [("q1", "Hello!")]
-    assert api.drafts  # at least one draft emitted
     assert store.appended == [("user", "hi"), ("assistant", "Hello!")]
 
 

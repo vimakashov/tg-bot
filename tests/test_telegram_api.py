@@ -7,23 +7,27 @@ def _ok(result=True):
     return {"ok": True, "result": result}
 
 
-async def test_answer_guest_query_posts_expected():
+async def test_answer_guest_query_sends_result_object():
     seen = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["url"] = str(request.url)
         seen["json"] = request.read()
-        return httpx.Response(200, json=_ok({"message_id": 5}))
+        return httpx.Response(200, json=_ok({"inline_message_id": "abc"}))
 
     api = TelegramApi("123:abc", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     res = await api.answer_guest_query("q1", "hello")
-    assert res == {"message_id": 5}
+    assert res == {"inline_message_id": "abc"}
     assert seen["url"].endswith("/bot123:abc/answerGuestQuery")
-    assert b"q1" in seen["json"] and b"hello" in seen["json"]
+    body = seen["json"]
+    # guest_query_id + the reply wrapped as an InlineQueryResult article whose
+    # InputTextMessageContent.message_text carries the reply.
+    assert b"q1" in body and b"hello" in body
+    assert b"input_message_content" in body and b"message_text" in body
     await api.close()
 
 
-async def test_send_message_draft_includes_guest_query_id():
+async def test_edit_inline_message_text():
     seen = {}
 
     def handler(request):
@@ -32,9 +36,9 @@ async def test_send_message_draft_includes_guest_query_id():
         return httpx.Response(200, json=_ok())
 
     api = TelegramApi("123:abc", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
-    await api.send_message_draft(chat_id=42, text="partial", guest_query_id="q1")
-    assert seen["url"].endswith("/sendMessageDraft")
-    assert b'"q1"' in seen["json"]
+    await api.edit_inline_message_text("inline-1", "updated text")
+    assert seen["url"].endswith("/editMessageText")
+    assert b"inline-1" in seen["json"] and b"updated text" in seen["json"]
     await api.close()
 
 
