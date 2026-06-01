@@ -1,7 +1,7 @@
 import pytest
 from bot.telegram.guest import (
     GuestMessage, parse_guest_message, strip_bot_mention, build_messages, handle_guest_message,
-    FALLBACK_TEXT,
+    FALLBACK_TEXT, CLEAR_REPLY, is_clear_command,
 )
 
 TEST_PROMPT = "You are a test assistant."
@@ -33,6 +33,24 @@ def test_strip_bot_mention():
     assert strip_bot_mention("@testbot hello there", "testbot") == "hello there"
     assert strip_bot_mention("hey @TestBot what's up", "testbot") == "hey what's up"
     assert strip_bot_mention("no mention", "testbot") == "no mention"
+
+
+def test_is_clear_command_exact():
+    assert is_clear_command("/clear") is True
+
+def test_is_clear_command_case_and_whitespace():
+    assert is_clear_command("  /CLEAR  ") is True
+
+def test_is_clear_command_after_stripping_botname_form():
+    # "/clear@testbot" -> strip_bot_mention removes "@testbot" -> "/clear"
+    assert is_clear_command(strip_bot_mention("/clear@testbot", "testbot")) is True
+
+def test_is_clear_command_rejects_extra_text():
+    assert is_clear_command("/clear please") is False
+
+def test_is_clear_command_rejects_unrelated():
+    assert is_clear_command("hello") is False
+    assert is_clear_command("") is False
 
 
 def test_build_messages_includes_system_history_reply_and_user():

@@ -7,6 +7,7 @@ log = logging.getLogger("tgbot.guest")
 
 TELEGRAM_MAX = 4096
 FALLBACK_TEXT = "⚠️ AI is unavailable right now, please try again in a moment."
+CLEAR_REPLY = "🧠 Context cleared — starting fresh."
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,10 @@ def parse_guest_message(update: dict) -> GuestMessage | None:
 def strip_bot_mention(text: str, bot_username: str) -> str:
     cleaned = re.sub(rf"@{re.escape(bot_username)}\b", " ", text, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def is_clear_command(text: str) -> bool:
+    return text.strip().casefold() == "/clear"
 
 
 def build_messages(history: list[dict], user_text: str, reply_text: str | None,
