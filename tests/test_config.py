@@ -27,16 +27,19 @@ def test_loads_required_and_defaults():
     assert cfg.port == 8080
     assert cfg.stream_interval == 1.0
     assert cfg.system_prompt == DEFAULT_SYSTEM_PROMPT
+    assert cfg.ai_base_url == "https://api.groq.com/openai/v1/chat/completions"
 
 
 def test_overrides_from_env():
     env = _base_env() | {"GROQ_MODEL": "llama-3.1-8b-instant", "CONTEXT_MESSAGES": "4",
-                         "PORT": "9000", "SYSTEM_PROMPT": "You are a pirate."}
+                         "PORT": "9000", "SYSTEM_PROMPT": "You are a pirate.",
+                         "AI_BASE_URL": "http://192.168.1.50:8080/v1/chat/completions"}
     cfg = Config.from_env(env)
     assert cfg.groq_model == "llama-3.1-8b-instant"
     assert cfg.context_messages == 4
     assert cfg.port == 9000
     assert cfg.system_prompt == "You are a pirate."
+    assert cfg.ai_base_url == "http://192.168.1.50:8080/v1/chat/completions"
 
 
 def test_missing_required_raises():

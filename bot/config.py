@@ -22,6 +22,7 @@ class Config:
     webhook_secret: str
     bot_username: str
     groq_model: str = "llama-3.3-70b-versatile"
+    ai_base_url: str = "https://api.groq.com/openai/v1/chat/completions"
     context_messages: int = 10
     db_path: str = "/data/memory.db"
     history_ttl_seconds: int = 86400
@@ -43,6 +44,7 @@ class Config:
             webhook_secret=env["WEBHOOK_SECRET"],
             bot_username=env["BOT_USERNAME"].lstrip("@"),
             groq_model=env.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
+            ai_base_url=env.get("AI_BASE_URL", "https://api.groq.com/openai/v1/chat/completions"),
             context_messages=int(env.get("CONTEXT_MESSAGES", "10")),
             db_path=env.get("DB_PATH", "/data/memory.db"),
             history_ttl_seconds=int(env.get("HISTORY_TTL_SECONDS", "86400")),

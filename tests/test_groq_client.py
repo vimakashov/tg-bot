@@ -38,6 +38,24 @@ async def test_stream_completion_yields_chunks():
     await client.close()
 
 
+async def test_stream_completion_posts_to_custom_base_url():
+    sse_body = 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n'
+    seen_urls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_urls.append(str(request.url))
+        return httpx.Response(200, text=sse_body)
+
+    transport = httpx.MockTransport(handler)
+    client = GroqClient("any-key", "local-model",
+                        base_url="http://my-llama.example.com:8080/v1/chat/completions",
+                        http_client=httpx.AsyncClient(transport=transport))
+    chunks = [c async for c in client.stream_completion([{"role": "user", "content": "hi"}])]
+    assert "".join(chunks) == "hi"
+    assert seen_urls == ["http://my-llama.example.com:8080/v1/chat/completions"]
+    await client.close()
+
+
 async def test_stream_completion_raises_on_http_error():
     transport = httpx.MockTransport(lambda r: httpx.Response(500, text="boom"))
     client = GroqClient("gsk_test", "m", http_client=httpx.AsyncClient(transport=transport))
