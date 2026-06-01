@@ -31,7 +31,7 @@ class TelegramApi:
         result = {
             "type": "article",
             "id": result_id,
-            "title": "brainratbot",
+            "title": "AI",
             "input_message_content": {"message_text": text},
         }
         return await self.call("answerGuestQuery",

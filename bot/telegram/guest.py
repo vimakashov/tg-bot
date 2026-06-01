@@ -3,13 +3,9 @@ import logging
 import re
 from dataclasses import dataclass
 
-log = logging.getLogger("brainratbot.guest")
+log = logging.getLogger("tgbot.guest")
 
 TELEGRAM_MAX = 4096
-SYSTEM_PROMPT = (
-    "You are @brainratbot, a concise, helpful AI assistant inside Telegram. "
-    "Answer the user's message directly and clearly."
-)
 FALLBACK_TEXT = "⚠️ AI is unavailable right now, please try again in a moment."
 
 
@@ -48,8 +44,9 @@ def strip_bot_mention(text: str, bot_username: str) -> str:
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
-def build_messages(history: list[dict], user_text: str, reply_text: str | None) -> list[dict]:
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+def build_messages(history: list[dict], user_text: str, reply_text: str | None,
+                   system_prompt: str) -> list[dict]:
+    messages = [{"role": "system", "content": system_prompt}]
     messages.extend(history)
     if reply_text:
         content = f'Context (message the user replied to): "{reply_text}"\n\nUser: {user_text}'
@@ -65,7 +62,7 @@ async def handle_guest_message(update: dict, api, ai, store, config) -> None:
         return
     user_text = strip_bot_mention(gm.text, config.bot_username)
     history = await store.get_history(gm.chat_id, gm.user_id, config.context_messages)
-    messages = build_messages(history, user_text, gm.reply_text)
+    messages = build_messages(history, user_text, gm.reply_text, config.system_prompt)
 
     # Guest mode allows exactly ONE reply, delivered via answerGuestQuery as a
     # single inline message — there is no per-token draft streaming here

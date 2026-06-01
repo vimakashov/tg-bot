@@ -3,7 +3,7 @@ import logging
 from typing import Awaitable, Callable
 from aiohttp import web
 
-log = logging.getLogger("brainratbot.webhook")
+log = logging.getLogger("tgbot.webhook")
 SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token"
 
 

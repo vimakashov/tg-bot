@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`brainratbot` is a Telegram **Guest-Mode** AI bot (Bot API 10.0). A user mentions `@brainratbot <question>` in any chat; Telegram sends a `guest_message` update; the bot generates a reply with the **Groq** API and answers once via `answerGuestQuery`. It runs in **webhook** mode behind Caddy, on a VPS, via Docker Compose.
+A configurable Telegram **Guest-Mode** AI bot (Bot API 10.0). A user mentions `@<your_bot> <question>` in any chat; Telegram sends a `guest_message` update; the bot generates a reply with the **Groq** API and answers once via `answerGuestQuery`. It runs in **webhook** mode behind Caddy, on a VPS, via Docker Compose. The bot's identity is fully env-driven — `BOT_USERNAME` and `SYSTEM_PROMPT` are configuration, never hardcoded; keep it that way when editing.
 
 Full design: `docs/superpowers/specs/2026-06-01-brainratbot-design.md`. Implementation plan: `docs/superpowers/plans/2026-06-01-brainratbot.md`.
 
@@ -35,7 +35,7 @@ pytest tests/test_guest.py -v               # one file
 pytest tests/test_guest.py::test_handler_accumulates_and_answers_once -v   # one test
 
 # Run the server locally (no Docker). Needs the 5 required env vars; DB_PATH must be writable.
-BOT_TOKEN=x BOT_USERNAME=brainratbot GROQ_API_KEY=x WEBHOOK_DOMAIN=localhost \
+BOT_TOKEN=x BOT_USERNAME=your_bot_username GROQ_API_KEY=x WEBHOOK_DOMAIN=localhost \
 WEBHOOK_SECRET=s DB_PATH=/tmp/m.db PORT=8080 python -m bot.main
 curl localhost:8080/health        # -> ok   (setWebhook will fail with a fake token; it's logged, server stays up)
 ```

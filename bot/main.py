@@ -13,7 +13,7 @@ from bot.telegram.guest import handle_guest_message
 from bot.telegram.webhook import create_app
 
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("brainratbot")
+log = logging.getLogger("tgbot")
 
 PRUNE_INTERVAL_SECONDS = 3600
 

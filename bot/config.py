@@ -7,6 +7,13 @@ class MissingConfig(Exception):
     pass
 
 
+# Generic, bot-agnostic default. Override per deployment with the SYSTEM_PROMPT env var.
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a helpful AI assistant in Telegram. "
+    "Answer the user's message directly and concisely."
+)
+
+
 @dataclass(frozen=True)
 class Config:
     bot_token: str
@@ -20,6 +27,7 @@ class Config:
     history_ttl_seconds: int = 86400
     port: int = 8080
     stream_interval: float = 1.0
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
     @staticmethod
     def from_env(env: dict | None = None) -> "Config":
@@ -40,4 +48,5 @@ class Config:
             history_ttl_seconds=int(env.get("HISTORY_TTL_SECONDS", "86400")),
             port=int(env.get("PORT", "8080")),
             stream_interval=float(env.get("STREAM_INTERVAL", "1.0")),
+            system_prompt=env.get("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT),
         )
