@@ -49,6 +49,13 @@ class MemoryStore:
         await self._db.execute("DELETE FROM messages WHERE created_at < ?", (cutoff,))
         await self._db.commit()
 
+    async def clear(self, chat_id: int, user_id: int) -> None:
+        await self._db.execute(
+            "DELETE FROM messages WHERE chat_id=? AND user_id=?",
+            (chat_id, user_id),
+        )
+        await self._db.commit()
+
     async def close(self) -> None:
         if self._db is not None:
             await self._db.close()

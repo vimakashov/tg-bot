@@ -45,3 +45,13 @@ async def test_prune_removes_expired(store):
     await store.prune(ttl_seconds=5000)
     hist = await store.get_history(1, 100, 10)
     assert hist == [{"role": "user", "content": "new"}]
+
+
+async def test_clear_removes_only_caller_scope(store):
+    await store.append(1, 100, "user", "a")
+    await store.append(1, 200, "user", "b")   # same chat, other user
+    await store.append(2, 100, "user", "c")   # other chat, same user
+    await store.clear(1, 100)
+    assert await store.get_history(1, 100, 10) == []
+    assert await store.get_history(1, 200, 10) == [{"role": "user", "content": "b"}]
+    assert await store.get_history(2, 100, 10) == [{"role": "user", "content": "c"}]

@@ -1,7 +1,7 @@
 import pytest
 from bot.telegram.guest import (
     GuestMessage, parse_guest_message, strip_bot_mention, build_messages, handle_guest_message,
-    FALLBACK_TEXT,
+    FALLBACK_TEXT, CLEAR_REPLY, is_clear_command,
 )
 
 TEST_PROMPT = "You are a test assistant."
@@ -35,6 +35,24 @@ def test_strip_bot_mention():
     assert strip_bot_mention("no mention", "testbot") == "no mention"
 
 
+def test_is_clear_command_exact():
+    assert is_clear_command("/clear") is True
+
+def test_is_clear_command_case_and_whitespace():
+    assert is_clear_command("  /CLEAR  ") is True
+
+def test_is_clear_command_after_stripping_botname_form():
+    # "/clear@testbot" -> strip_bot_mention removes "@testbot" -> "/clear"
+    assert is_clear_command(strip_bot_mention("/clear@testbot", "testbot")) is True
+
+def test_is_clear_command_rejects_extra_text():
+    assert is_clear_command("/clear please") is False
+
+def test_is_clear_command_rejects_unrelated():
+    assert is_clear_command("hello") is False
+    assert is_clear_command("") is False
+
+
 def test_build_messages_includes_system_history_reply_and_user():
     history = [{"role": "user", "content": "earlier"}, {"role": "assistant", "content": "ok"}]
     msgs = build_messages(history, "what is 2+2", "the math question", TEST_PROMPT)
@@ -49,12 +67,16 @@ class FakeStore:
     def __init__(self, history=None):
         self._history = history or []
         self.appended = []
+        self.cleared = None
 
     async def get_history(self, chat_id, user_id, limit):
         return list(self._history)
 
     async def append(self, chat_id, user_id, role, content):
         self.appended.append((role, content))
+
+    async def clear(self, chat_id, user_id):
+        self.cleared = (chat_id, user_id)
 
 
 class FakeAI:
@@ -102,6 +124,14 @@ async def test_handler_sends_fallback_on_ai_error():
     store, ai, api = FakeStore(), FakeAI(error=RuntimeError("groq down")), FakeApi()
     await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
     assert api.answers == [("q1", FALLBACK_TEXT)]
+
+
+async def test_handler_clear_command_resets_and_skips_ai():
+    store, ai, api = FakeStore(history=[{"role": "user", "content": "old"}]), FakeAI(["should not run"]), FakeApi()
+    await handle_guest_message(_update("@testbot /clear"), api, ai, store, Cfg())
+    assert store.cleared == (42, 7)              # (chat_id, user_id) from _update
+    assert api.answers == [("q1", CLEAR_REPLY)]  # answered exactly once
+    assert store.appended == []                  # no history written
 
 
 async def test_handler_truncates_to_4096():
