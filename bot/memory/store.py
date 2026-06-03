@@ -36,6 +36,22 @@ class MemoryStore:
             )
             """
         )
+        await self._db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS business_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                connection_id TEXT NOT NULL,
+                chat_id INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_business_scope "
+            "ON business_messages (connection_id, chat_id, id)"
+        )
         await self._db.commit()
 
     async def append(self, chat_id: int, user_id: int, role: str, content: str,
@@ -58,6 +74,7 @@ class MemoryStore:
     async def prune(self, ttl_seconds: int) -> None:
         cutoff = time.time() - ttl_seconds
         await self._db.execute("DELETE FROM messages WHERE created_at < ?", (cutoff,))
+        await self._db.execute("DELETE FROM business_messages WHERE created_at < ?", (cutoff,))
         await self._db.commit()
 
     async def clear(self, chat_id: int, user_id: int) -> None:
@@ -108,6 +125,26 @@ class MemoryStore:
             (connection_id,),
         )
         await self._db.commit()
+
+    async def append_business(self, connection_id: str, chat_id: int, role: str,
+                              content: str, created_at: float | None = None) -> None:
+        ts = time.time() if created_at is None else created_at
+        await self._db.execute(
+            "INSERT INTO business_messages (connection_id, chat_id, role, content, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (connection_id, chat_id, role, content, ts),
+        )
+        await self._db.commit()
+
+    async def get_business_history(self, connection_id: str, chat_id: int,
+                                   limit: int) -> list[dict]:
+        cur = await self._db.execute(
+            "SELECT role, content FROM business_messages "
+            "WHERE connection_id=? AND chat_id=? ORDER BY id DESC LIMIT ?",
+            (connection_id, chat_id, limit),
+        )
+        rows = await cur.fetchall()
+        return [{"role": r, "content": c} for r, c in reversed(rows)]
 
     async def close(self) -> None:
         if self._db is not None:
