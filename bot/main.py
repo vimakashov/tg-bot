@@ -10,6 +10,7 @@ from bot.ai.groq_client import GroqClient
 from bot.memory.store import MemoryStore
 from bot.telegram.api import TelegramApi
 from bot.telegram.guest import handle_guest_message
+from bot.telegram.business import handle_business_connection, handle_business_message
 from bot.telegram.webhook import create_app
 
 logging.basicConfig(level=logging.INFO)
@@ -18,13 +19,27 @@ log = logging.getLogger("tgbot")
 PRUNE_INTERVAL_SECONDS = 3600
 
 
+async def dispatch(update: dict, api, ai, store, config) -> None:
+    """Route a Telegram update to the right handler by its top-level type.
+
+    Unknown update types are ignored. Guest and business modes share the same
+    api/ai/store/config instances and the one webhook.
+    """
+    if "business_connection" in update:
+        await handle_business_connection(update, store)
+    elif "business_message" in update:
+        await handle_business_message(update, api, ai, store, config)
+    elif "guest_message" in update:
+        await handle_guest_message(update, api, ai, store, config)
+
+
 def build_app(config: Config) -> web.Application:
     store = MemoryStore(config.db_path)
     ai = GroqClient(config.groq_api_key, config.groq_model, config.ai_base_url)
     api = TelegramApi(config.bot_token)
 
     async def handler(update: dict) -> None:
-        await handle_guest_message(update, api, ai, store, config)
+        await dispatch(update, api, ai, store, config)
 
     app = create_app(handler, config.webhook_secret)
 
