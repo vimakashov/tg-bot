@@ -41,9 +41,19 @@ class TelegramApi:
         return await self.call("editMessageText",
                                inline_message_id=inline_message_id, text=text)
 
+    async def send_business_message(self, business_connection_id: str, chat_id: int,
+                                    text: str) -> object:
+        # Secretary mode: standard sendMessage with a business_connection_id sends
+        # the message AS the owner. The chat must have been active in the last 24h
+        # and the connection's can_reply must be true, or the API returns ok:false.
+        return await self.call("sendMessage",
+                               business_connection_id=business_connection_id,
+                               chat_id=chat_id, text=text)
+
     async def set_webhook(self, url: str, secret_token: str) -> object:
         return await self.call("setWebhook", url=url, secret_token=secret_token,
-                               allowed_updates=["guest_message", "message"])
+                               allowed_updates=["guest_message", "message",
+                                                "business_connection", "business_message"])
 
     async def close(self) -> None:
         await self._client.aclose()
