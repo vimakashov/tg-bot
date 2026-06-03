@@ -3,6 +3,7 @@ from bot.telegram.business import (
     BusinessConnection, parse_business_connection,
     BusinessMessage, parse_business_message,
     handle_business_connection,
+    handle_business_message,
 )
 
 
@@ -26,6 +27,42 @@ class FakeStore:
 
     async def append_business(self, connection_id, chat_id, role, content):
         self.appended.append((role, content))
+
+
+class FakeAI:
+    def __init__(self, chunks=None, error=None):
+        self._chunks = chunks or []
+        self._error = error
+
+    async def stream_completion(self, messages):
+        if self._error:
+            raise self._error
+        for c in self._chunks:
+            yield c
+
+
+class FakeApi:
+    def __init__(self, error=None):
+        self.sent = []
+        self._error = error
+
+    async def send_business_message(self, business_connection_id, chat_id, text):
+        if self._error:
+            raise self._error
+        self.sent.append((business_connection_id, chat_id, text))
+
+
+BUSINESS_PROMPT = "Reply as the owner."
+
+
+class Cfg:
+    context_messages = 10
+    business_system_prompt = BUSINESS_PROMPT
+
+
+def _enabled_conn(owner_id=555):
+    return {"connection_id": "conn1", "owner_user_id": owner_id,
+            "can_reply": True, "is_enabled": True}
 
 
 def _conn_update(connection_id="conn1", owner_id=555, can_reply=True, is_enabled=True):
@@ -103,3 +140,91 @@ async def test_handle_business_connection_ignores_other_updates():
     store = FakeStore()
     await handle_business_connection({"message": {}}, store)
     assert store.upserts == []
+
+
+async def test_business_autopilot_replies_and_persists():
+    store = FakeStore(connection=_enabled_conn())
+    ai, api = FakeAI(["Hel", "lo!"]), FakeApi()
+    await handle_business_message(_msg_update(from_id=999, text="hi"), api, ai, store, Cfg())
+    assert api.sent == [("conn1", 999, "Hello!")]
+    assert store.appended == [("user", "hi"), ("assistant", "Hello!")]
+
+
+async def test_business_skips_owner_own_messages():
+    store = FakeStore(connection=_enabled_conn(owner_id=555))
+    ai, api = FakeAI(["should not run"]), FakeApi()
+    await handle_business_message(_msg_update(from_id=555, text="note to self"), api, ai, store, Cfg())
+    assert api.sent == []
+    assert store.appended == []
+
+
+async def test_business_skips_non_private_chats():
+    store = FakeStore(connection=_enabled_conn())
+    ai, api = FakeAI(["nope"]), FakeApi()
+    await handle_business_message(_msg_update(from_id=999, chat_type="group"), api, ai, store, Cfg())
+    assert api.sent == []
+
+
+async def test_business_skips_empty_text():
+    store = FakeStore(connection=_enabled_conn())
+    ai, api = FakeAI(["nope"]), FakeApi()
+    upd = _msg_update(from_id=999)
+    del upd["business_message"]["text"]
+    await handle_business_message(upd, api, ai, store, Cfg())
+    assert api.sent == []
+
+
+async def test_business_drops_when_connection_missing():
+    store = FakeStore(connection=None)
+    ai, api = FakeAI(["nope"]), FakeApi()
+    await handle_business_message(_msg_update(from_id=999), api, ai, store, Cfg())
+    assert api.sent == []
+
+
+async def test_business_drops_when_can_reply_false():
+    conn = _enabled_conn()
+    conn["can_reply"] = False
+    store = FakeStore(connection=conn)
+    ai, api = FakeAI(["nope"]), FakeApi()
+    await handle_business_message(_msg_update(from_id=999), api, ai, store, Cfg())
+    assert api.sent == []
+
+
+async def test_business_drops_when_disabled():
+    conn = _enabled_conn()
+    conn["is_enabled"] = False
+    store = FakeStore(connection=conn)
+    ai, api = FakeAI(["nope"]), FakeApi()
+    await handle_business_message(_msg_update(from_id=999), api, ai, store, Cfg())
+    assert api.sent == []
+
+
+async def test_business_stays_silent_on_ai_error():
+    store = FakeStore(connection=_enabled_conn())
+    ai, api = FakeAI(error=RuntimeError("groq down")), FakeApi()
+    await handle_business_message(_msg_update(from_id=999, text="hi"), api, ai, store, Cfg())
+    assert api.sent == []
+    assert store.appended == []
+
+
+async def test_business_stays_silent_on_empty_output():
+    store = FakeStore(connection=_enabled_conn())
+    ai, api = FakeAI([]), FakeApi()
+    await handle_business_message(_msg_update(from_id=999, text="hi"), api, ai, store, Cfg())
+    assert api.sent == []
+    assert store.appended == []
+
+
+async def test_business_does_not_persist_when_send_fails():
+    store = FakeStore(connection=_enabled_conn())
+    ai, api = FakeAI(["Hello!"]), FakeApi(error=RuntimeError("outside 24h window"))
+    await handle_business_message(_msg_update(from_id=999, text="hi"), api, ai, store, Cfg())
+    assert store.appended == []
+
+
+async def test_business_truncates_to_4096():
+    store = FakeStore(connection=_enabled_conn())
+    ai, api = FakeAI(["x" * 5000]), FakeApi()
+    await handle_business_message(_msg_update(from_id=999, text="hi"), api, ai, store, Cfg())
+    _, _, text = api.sent[0]
+    assert len(text) == 4096

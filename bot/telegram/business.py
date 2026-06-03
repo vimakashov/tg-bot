@@ -76,3 +76,49 @@ async def handle_business_connection(update: dict, store) -> None:
                                   conn.can_reply, conn.is_enabled)
     log.info("business_connection upserted: id=%s enabled=%s can_reply=%s",
              conn.connection_id, conn.is_enabled, conn.can_reply)
+
+
+async def handle_business_message(update: dict, api, ai, store, config) -> None:
+    bm = parse_business_message(update)
+    if bm is None:
+        return
+    if bm.chat_type != "private" or not bm.text:
+        return
+    conn = await store.get_connection(bm.connection_id)
+    if conn is None or not conn["is_enabled"] or not conn["can_reply"]:
+        log.info("business_message dropped: connection %s missing/disabled/no-reply",
+                 bm.connection_id)
+        return
+    # The bot receives the owner's own outgoing messages too — never answer ourselves.
+    if bm.from_user_id == conn["owner_user_id"]:
+        return
+
+    history = await store.get_business_history(bm.connection_id, bm.chat_id,
+                                               config.context_messages)
+    messages = build_messages(history, bm.text, bm.reply_text,
+                              config.business_system_prompt)
+
+    # Accumulate the full Groq stream (single-shot, like the guest path).
+    try:
+        full = ""
+        async for chunk in ai.stream_completion(messages):
+            full += chunk
+    except Exception:
+        log.exception("AI generation failed (business)")
+        full = ""
+
+    # AI failure or empty output -> stay silent. A fake "AI unavailable" message
+    # sent AS the owner would be inappropriate (spec section 3, 6).
+    if not full:
+        return
+
+    reply = full[:TELEGRAM_MAX]
+    try:
+        await api.send_business_message(bm.connection_id, bm.chat_id, reply)
+    except Exception:
+        log.exception("send_business_message failed (chat %s)", bm.chat_id)
+        return
+
+    # Persist only on a successful send (mirrors the guest path).
+    await store.append_business(bm.connection_id, bm.chat_id, "user", bm.text)
+    await store.append_business(bm.connection_id, bm.chat_id, "assistant", reply)
