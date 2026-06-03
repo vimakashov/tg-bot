@@ -74,6 +74,22 @@ async def test_send_business_message_posts_connection_chat_and_text():
     await api.close()
 
 
+async def test_set_webhook_includes_business_updates():
+    seen = {}
+
+    def handler(request):
+        seen["json"] = request.read()
+        return httpx.Response(200, json=_ok())
+
+    api = TelegramApi("123:abc", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    await api.set_webhook("https://bot.example.com/webhook", "s3cret")
+    body = seen["json"]
+    assert b"guest_message" in body
+    assert b"business_connection" in body
+    assert b"business_message" in body
+    await api.close()
+
+
 async def test_raises_on_not_ok():
     def handler(request):
         return httpx.Response(200, json={"ok": False, "description": "bad"})

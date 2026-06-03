@@ -52,7 +52,8 @@ class TelegramApi:
 
     async def set_webhook(self, url: str, secret_token: str) -> object:
         return await self.call("setWebhook", url=url, secret_token=secret_token,
-                               allowed_updates=["guest_message", "message"])
+                               allowed_updates=["guest_message", "message",
+                                                "business_connection", "business_message"])
 
     async def close(self) -> None:
         await self._client.aclose()
