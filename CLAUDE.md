@@ -4,15 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A configurable Telegram **Guest-Mode** AI bot (Bot API 10.0). A user mentions `@<your_bot> <question>` in any chat; Telegram sends a `guest_message` update; the bot generates a reply with the **Groq** API and answers once via `answerGuestQuery`. It runs in **webhook** mode behind Caddy, on a VPS, via Docker Compose. The bot's identity is fully env-driven — `BOT_USERNAME` and `SYSTEM_PROMPT` are configuration, never hardcoded; keep it that way when editing.
+A configurable Telegram AI bot (Bot API 10.0) with two modes, both served from one webhook process:
 
-Full design: `docs/superpowers/specs/2026-06-01-brainratbot-design.md`. Implementation plan: `docs/superpowers/plans/2026-06-01-brainratbot.md`.
+- **Guest Mode** — a user mentions `@<your_bot> <question>` in any chat; Telegram sends a `guest_message` update; the bot generates a reply with the **Groq** API and answers once via `answerGuestQuery`. An exact `@<bot> /clear` wipes the caller's history instead of replying.
+- **Secretary (Business) Mode** — Telegram Business connection updates (`business_connection` / `business_message`); the bot replies **as the owner** in connected private 1:1 chats on full autopilot, via `sendMessage` with a `business_connection_id`.
+
+It runs in **webhook** mode behind Caddy, on a VPS, via Docker Compose. The bot's identity is fully env-driven — `BOT_USERNAME`, `SYSTEM_PROMPT`, and `BUSINESS_SYSTEM_PROMPT` are configuration, never hardcoded; keep it that way when editing.
+
+Designs/plans (`docs/superpowers/`): Guest-Mode core — `specs/2026-06-01-brainratbot-design.md` + `plans/2026-06-01-brainratbot.md`; `/clear` command — `specs/2026-06-01-clear-command-design.md` + `plans/2026-06-01-clear-command.md`; Secretary Mode — `specs/2026-06-03-secretary-mode-design.md` + `plans/2026-06-03-secretary-mode.md`.
 
 ## Tooling: use Serena MCP for code work
 
-For searching, reading, and editing code in this repo, **use the Serena MCP tools** (prefix `serena`) rather than raw file/grep tools:
+For searching, reading, and editing code in this repo, **use the Serena MCP tools** (prefix `serena`) rather than raw file/grep tools. This is mandatory for code work — do not fall back to Grep/Read/Edit on `.py` files just because Serena's tools aren't loaded yet.
 
-- **First in a session:** call `serena.initial_instructions`, then `serena.activate_project` for this directory (and `serena.onboarding` if Serena reports it hasn't been done).
+- **The Serena tools are *deferred*:** at session start their schemas are not loaded — they appear only as bare names (e.g. `mcp__plugin_serena_serena__find_symbol`) in a `<system-reminder>`. You must **load them first via `ToolSearch`** (`select:<tool_name>,...`) before they can be called; calling one without loading its schema fails. Loading them is the first step, not an excuse to skip Serena.
+- **First in a session:** load the startup tools via `ToolSearch`, then call `serena.initial_instructions`, then `serena.activate_project` for this directory (and `serena.onboarding` if Serena reports it hasn't been done).
+- **Keep the index fresh:** the symbol cache lives in `.serena/cache/` and goes stale after code changes land out-of-session. Rebuild it with `uvx --from serena-agent serena project index` (run from the repo root) when symbol lookups look outdated.
 - **Search:** `serena.find_symbol`, `serena.get_symbols_overview`, `serena.find_referencing_symbols`, `serena.search_for_pattern` — prefer these over plain Grep/Read for navigating code.
 - **Edit:** `serena.replace_symbol_body`, `serena.insert_after_symbol` / `insert_before_symbol`, `serena.replace_content` — prefer these over raw Edit/Write for code changes, so edits stay symbol-aware.
 - Plain Read/Bash are still fine for non-code files (configs, docs, `docker-compose.yml`, logs) and for running tests.
