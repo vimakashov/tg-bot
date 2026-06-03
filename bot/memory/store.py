@@ -25,6 +25,17 @@ class MemoryStore:
         await self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_scope ON messages (chat_id, user_id, id)"
         )
+        await self._db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS business_connections (
+                connection_id TEXT PRIMARY KEY,
+                owner_user_id INTEGER NOT NULL,
+                can_reply INTEGER NOT NULL,
+                is_enabled INTEGER NOT NULL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
         await self._db.commit()
 
     async def append(self, chat_id: int, user_id: int, role: str, content: str,
@@ -53,6 +64,48 @@ class MemoryStore:
         await self._db.execute(
             "DELETE FROM messages WHERE chat_id=? AND user_id=?",
             (chat_id, user_id),
+        )
+        await self._db.commit()
+
+    async def upsert_connection(self, connection_id: str, owner_user_id: int,
+                                can_reply: bool, is_enabled: bool,
+                                updated_at: float | None = None) -> None:
+        ts = time.time() if updated_at is None else updated_at
+        await self._db.execute(
+            """
+            INSERT INTO business_connections
+                (connection_id, owner_user_id, can_reply, is_enabled, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(connection_id) DO UPDATE SET
+                owner_user_id=excluded.owner_user_id,
+                can_reply=excluded.can_reply,
+                is_enabled=excluded.is_enabled,
+                updated_at=excluded.updated_at
+            """,
+            (connection_id, owner_user_id, int(can_reply), int(is_enabled), ts),
+        )
+        await self._db.commit()
+
+    async def get_connection(self, connection_id: str) -> dict | None:
+        cur = await self._db.execute(
+            "SELECT connection_id, owner_user_id, can_reply, is_enabled "
+            "FROM business_connections WHERE connection_id=?",
+            (connection_id,),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            return None
+        return {
+            "connection_id": row[0],
+            "owner_user_id": row[1],
+            "can_reply": bool(row[2]),
+            "is_enabled": bool(row[3]),
+        }
+
+    async def delete_connection(self, connection_id: str) -> None:
+        await self._db.execute(
+            "DELETE FROM business_connections WHERE connection_id=?",
+            (connection_id,),
         )
         await self._db.commit()
 

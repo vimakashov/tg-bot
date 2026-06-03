@@ -55,3 +55,29 @@ async def test_clear_removes_only_caller_scope(store):
     assert await store.get_history(1, 100, 10) == []
     assert await store.get_history(1, 200, 10) == [{"role": "user", "content": "b"}]
     assert await store.get_history(2, 100, 10) == [{"role": "user", "content": "c"}]
+
+
+async def test_upsert_and_get_connection(store):
+    await store.upsert_connection("conn1", owner_user_id=555, can_reply=True, is_enabled=True)
+    conn = await store.get_connection("conn1")
+    assert conn == {"connection_id": "conn1", "owner_user_id": 555,
+                    "can_reply": True, "is_enabled": True}
+
+
+async def test_get_connection_missing_returns_none(store):
+    assert await store.get_connection("nope") is None
+
+
+async def test_upsert_connection_overwrites(store):
+    await store.upsert_connection("conn1", owner_user_id=555, can_reply=True, is_enabled=True)
+    await store.upsert_connection("conn1", owner_user_id=555, can_reply=False, is_enabled=False)
+    conn = await store.get_connection("conn1")
+    assert conn["can_reply"] is False
+    assert conn["is_enabled"] is False
+    assert conn["owner_user_id"] == 555
+
+
+async def test_delete_connection(store):
+    await store.upsert_connection("conn1", owner_user_id=555, can_reply=True, is_enabled=True)
+    await store.delete_connection("conn1")
+    assert await store.get_connection("conn1") is None
