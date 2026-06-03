@@ -63,3 +63,16 @@ def parse_business_message(update: dict) -> BusinessMessage | None:
         text=bm.get("text", ""),
         reply_text=reply.get("text"),
     )
+
+
+async def handle_business_connection(update: dict, store) -> None:
+    conn = parse_business_connection(update)
+    if conn is None:
+        return
+    # Upsert always: a disabled/can_reply=false connection is stored with those
+    # flags so handle_business_message's gate sees the current state. Survives
+    # process restarts.
+    await store.upsert_connection(conn.connection_id, conn.owner_user_id,
+                                  conn.can_reply, conn.is_enabled)
+    log.info("business_connection upserted: id=%s enabled=%s can_reply=%s",
+             conn.connection_id, conn.is_enabled, conn.can_reply)

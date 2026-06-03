@@ -2,7 +2,30 @@ import pytest
 from bot.telegram.business import (
     BusinessConnection, parse_business_connection,
     BusinessMessage, parse_business_message,
+    handle_business_connection,
 )
+
+
+class FakeStore:
+    def __init__(self, history=None, connection=None):
+        self._history = history or []
+        self._connection = connection
+        self.upserts = []
+        self.appended = []
+
+    async def upsert_connection(self, connection_id, owner_user_id, can_reply, is_enabled):
+        self.upserts.append((connection_id, owner_user_id, can_reply, is_enabled))
+        self._connection = {"connection_id": connection_id, "owner_user_id": owner_user_id,
+                            "can_reply": can_reply, "is_enabled": is_enabled}
+
+    async def get_connection(self, connection_id):
+        return self._connection
+
+    async def get_business_history(self, connection_id, chat_id, limit):
+        return list(self._history)
+
+    async def append_business(self, connection_id, chat_id, role, content):
+        self.appended.append((role, content))
 
 
 def _conn_update(connection_id="conn1", owner_id=555, can_reply=True, is_enabled=True):
@@ -61,3 +84,22 @@ def test_parse_business_message_no_text_defaults_empty():
     bm = parse_business_message(update)
     assert bm.text == ""
     assert bm.reply_text is None
+
+
+async def test_handle_business_connection_upserts():
+    store = FakeStore()
+    await handle_business_connection(_conn_update(connection_id="c9", owner_id=42,
+                                                  can_reply=True, is_enabled=True), store)
+    assert store.upserts == [("c9", 42, True, True)]
+
+
+async def test_handle_business_connection_disabled_roundtrip():
+    store = FakeStore()
+    await handle_business_connection(_conn_update(can_reply=False, is_enabled=False), store)
+    assert store.upserts == [("conn1", 555, False, False)]
+
+
+async def test_handle_business_connection_ignores_other_updates():
+    store = FakeStore()
+    await handle_business_connection({"message": {}}, store)
+    assert store.upserts == []
