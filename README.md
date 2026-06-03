@@ -164,6 +164,31 @@ Send `@<your_bot> /clear` to reset your own conversation context in that chat; t
 bot confirms and the next message starts fresh. The reset is per-user, per-chat —
 it only clears your history, not other participants'.
 
+## Secretary (Business) Mode
+
+In addition to answering guest mentions, the bot supports **Secretary Mode**: it can reply to
+incoming private messages on the account owner's behalf, writing in the first person as if the
+owner themselves sent the reply.
+
+**How to connect:** in the Telegram app, go to **Settings → Business → Chatbots** and add this
+bot. That in-app step is both the opt-in and the instant kill-switch — disconnect the bot there
+at any time to stop all secretary replies immediately. There is no server-side enable flag; if
+the owner hasn't connected the bot, Telegram simply sends no business updates.
+
+Once connected, the bot replies to incoming **private 1:1 chats only** — group and channel
+messages are intentionally ignored. It skips the owner's own outgoing messages. If the AI call
+fails or produces empty output, the bot stays silent rather than sending a placeholder message
+as the owner.
+
+The persona is configured via `BUSINESS_SYSTEM_PROMPT` in `.env`. The default is conservative:
+polite and concise, but it will not agree to payments, schedule meetings, or make firm
+commitments on the owner's behalf. Override it if you want a different tone or set of
+instructions.
+
+> ⚠️ **Impersonation risk:** the bot sends messages that appear to come from the owner's
+> account. Recipients cannot tell the difference. Use the default prompt or write your own
+> carefully — avoid having the bot agree to anything in your name.
+
 ## Architecture
 
 `Telegram → Caddy (443, TLS) → bot (aiohttp, 8080) → Groq (stream) + SQLite (memory)`
