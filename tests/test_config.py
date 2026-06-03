@@ -1,5 +1,5 @@
 import pytest
-from bot.config import Config, MissingConfig, DEFAULT_SYSTEM_PROMPT
+from bot.config import Config, MissingConfig, DEFAULT_SYSTEM_PROMPT, DEFAULT_BUSINESS_SYSTEM_PROMPT
 
 
 def _base_env():
@@ -40,6 +40,17 @@ def test_overrides_from_env():
     assert cfg.port == 9000
     assert cfg.system_prompt == "You are a pirate."
     assert cfg.ai_base_url == "http://192.168.1.50:8080/v1/chat/completions"
+
+
+def test_business_system_prompt_default():
+    cfg = Config.from_env(_base_env())
+    assert cfg.business_system_prompt == DEFAULT_BUSINESS_SYSTEM_PROMPT
+
+
+def test_business_system_prompt_override():
+    env = _base_env() | {"BUSINESS_SYSTEM_PROMPT": "Reply as me, briefly."}
+    cfg = Config.from_env(env)
+    assert cfg.business_system_prompt == "Reply as me, briefly."
 
 
 def test_missing_required_raises():

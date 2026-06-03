@@ -13,6 +13,15 @@ DEFAULT_SYSTEM_PROMPT = (
     "Answer the user's message directly and concisely."
 )
 
+# First-person persona for Secretary (Business) Mode. The bot replies AS the owner.
+# Deliberately conservative: it must not commit the owner to payments, meetings, or promises.
+DEFAULT_BUSINESS_SYSTEM_PROMPT = (
+    "You are replying on behalf of the account owner, in the first person, as if you were them. "
+    "Be polite, concise, and natural. Do NOT agree to payments, send money, make firm commitments, "
+    "schedule meetings, or make promises on the owner's behalf — if asked, say you'll get back to them. "
+    "If you are unsure or the request is sensitive, keep the reply brief and non-committal."
+)
+
 
 @dataclass(frozen=True)
 class Config:
@@ -29,6 +38,7 @@ class Config:
     port: int = 8080
     stream_interval: float = 1.0
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    business_system_prompt: str = DEFAULT_BUSINESS_SYSTEM_PROMPT
 
     @staticmethod
     def from_env(env: dict | None = None) -> "Config":
@@ -51,4 +61,5 @@ class Config:
             port=int(env.get("PORT", "8080")),
             stream_interval=float(env.get("STREAM_INTERVAL", "1.0")),
             system_prompt=env.get("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT),
+            business_system_prompt=env.get("BUSINESS_SYSTEM_PROMPT", DEFAULT_BUSINESS_SYSTEM_PROMPT),
         )
