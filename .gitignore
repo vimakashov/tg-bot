@@ -9,3 +9,4 @@ data/
 .pytest_cache/
 caddy_data/
 caddy_config/
+.serena/
