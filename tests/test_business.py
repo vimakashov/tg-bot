@@ -1,4 +1,5 @@
 import pytest
+from bot.telegram.api import TelegramError
 from bot.telegram.business import (
     BusinessConnection, parse_business_connection,
     BusinessMessage, parse_business_message,
@@ -42,11 +43,21 @@ class FakeAI:
 
 
 class FakeApi:
-    def __init__(self, error=None):
-        self.sent = []
+    def __init__(self, error=None, rich_error=None):
+        self.sent = []         # successful sends (rich or plain): (conn, chat, text)
+        self.rich_sent = []    # every rich attempt
+        self.plain_sent = []   # every plain attempt
         self._error = error
+        self._rich_error = rich_error
+
+    async def send_rich_business_message(self, business_connection_id, chat_id, text):
+        self.rich_sent.append((business_connection_id, chat_id, text))
+        if self._rich_error:
+            raise self._rich_error
+        self.sent.append((business_connection_id, chat_id, text))
 
     async def send_business_message(self, business_connection_id, chat_id, text):
+        self.plain_sent.append((business_connection_id, chat_id, text))
         if self._error:
             raise self._error
         self.sent.append((business_connection_id, chat_id, text))
@@ -217,9 +228,23 @@ async def test_business_stays_silent_on_empty_output():
 
 async def test_business_does_not_persist_when_send_fails():
     store = FakeStore(connection=_enabled_conn())
-    ai, api = FakeAI(["Hello!"]), FakeApi(error=RuntimeError("outside 24h window"))
+    ai = FakeAI(["Hello!"])
+    api = FakeApi(rich_error=TelegramError("can't parse markdown"),
+                  error=RuntimeError("outside 24h window"))
     await handle_business_message(_msg_update(from_id=999, text="hi"), api, ai, store, Cfg())
+    assert api.sent == []
     assert store.appended == []
+
+
+async def test_business_falls_back_to_plain_on_rich_rejection():
+    store = FakeStore(connection=_enabled_conn())
+    ai = FakeAI(["**Hello!**"])
+    api = FakeApi(rich_error=TelegramError("can't parse markdown"))
+    await handle_business_message(_msg_update(from_id=999, text="hi"), api, ai, store, Cfg())
+    # rich attempted, then plain fallback succeeded
+    assert api.rich_sent == [("conn1", 999, "**Hello!**")]
+    assert api.plain_sent == [("conn1", 999, "**Hello!**")]
+    assert store.appended == [("user", "hi"), ("assistant", "**Hello!**")]
 
 
 async def test_business_truncates_to_4096():

@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from bot.telegram.api import TelegramError
 from bot.telegram.guest import build_messages, TELEGRAM_MAX
 
 log = logging.getLogger("tgbot.business")
@@ -114,9 +115,16 @@ async def handle_business_message(update: dict, api, ai, store, config) -> None:
 
     reply = full[:TELEGRAM_MAX]
     try:
-        await api.send_business_message(bm.connection_id, bm.chat_id, reply)
+        await api.send_rich_business_message(bm.connection_id, bm.chat_id, reply)
+    except TelegramError:
+        # Telegram rejected the Markdown -> resend as plain text (AS the owner).
+        try:
+            await api.send_business_message(bm.connection_id, bm.chat_id, reply)
+        except Exception:
+            log.exception("send_business_message (plain fallback) failed (chat %s)", bm.chat_id)
+            return
     except Exception:
-        log.exception("send_business_message failed (chat %s)", bm.chat_id)
+        log.exception("send_rich_business_message failed (chat %s)", bm.chat_id)
         return
 
     # Persist only on a successful send (mirrors the guest path).
