@@ -23,16 +23,21 @@ class TelegramApi:
         return data["result"]
 
     async def answer_guest_query(self, guest_query_id: str, text: str,
-                                 result_id: str = "1") -> object:
+                                 result_id: str = "1", rich: bool = True) -> object:
         # Bot API 10.0: answerGuestQuery takes a `result` (InlineQueryResult),
-        # NOT a plain `text`. We wrap the reply as an article whose message body
-        # is an InputTextMessageContent. Returns a SentGuestMessage (with
-        # inline_message_id), which can later be edited via editMessageText.
+        # NOT a plain `text`. We wrap the reply as an article. Bot API 10.1 lets
+        # the article's input_message_content be an InputRichMessageContent, so
+        # the LLM's Markdown is rendered by Telegram. `rich=False` falls back to a
+        # plain InputTextMessageContent when Telegram rejects the formatting.
+        if rich:
+            content = {"rich_message": {"markdown": text}}
+        else:
+            content = {"message_text": text}
         result = {
             "type": "article",
             "id": result_id,
             "title": "AI",
-            "input_message_content": {"message_text": text},
+            "input_message_content": content,
         }
         return await self.call("answerGuestQuery",
                                guest_query_id=guest_query_id, result=result)
@@ -49,6 +54,17 @@ class TelegramApi:
         return await self.call("sendMessage",
                                business_connection_id=business_connection_id,
                                chat_id=chat_id, text=text)
+
+    async def send_rich_business_message(self, business_connection_id: str, chat_id: int,
+                                         text: str) -> object:
+        # Bot API 10.1 Secretary mode: sendRichMessage with a business_connection_id
+        # sends AS the owner with Markdown rendered by Telegram. The LLM's Markdown
+        # goes straight into rich_message.markdown — no escaping. Same 24h-window /
+        # can_reply constraints as send_business_message; ok:false -> TelegramError.
+        return await self.call("sendRichMessage",
+                               business_connection_id=business_connection_id,
+                               chat_id=chat_id,
+                               rich_message={"markdown": text})
 
     async def set_webhook(self, url: str, secret_token: str) -> object:
         return await self.call("setWebhook", url=url, secret_token=secret_token,

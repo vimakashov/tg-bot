@@ -3,6 +3,8 @@ import logging
 import re
 from dataclasses import dataclass
 
+from bot.telegram.api import TelegramError
+
 log = logging.getLogger("tgbot.guest")
 
 TELEGRAM_MAX = 4096
@@ -68,7 +70,7 @@ async def handle_guest_message(update: dict, api, ai, store, config) -> None:
     user_text = strip_bot_mention(gm.text, config.bot_username)
     if is_clear_command(user_text):
         await store.clear(gm.chat_id, gm.user_id)
-        await api.answer_guest_query(gm.query_id, CLEAR_REPLY)
+        await api.answer_guest_query(gm.query_id, CLEAR_REPLY, rich=False)
         return
     history = await store.get_history(gm.chat_id, gm.user_id, config.context_messages)
     messages = build_messages(history, user_text, gm.reply_text, config.system_prompt)
@@ -86,7 +88,12 @@ async def handle_guest_message(update: dict, api, ai, store, config) -> None:
         full = ""
 
     reply = (full[:TELEGRAM_MAX]) if full else FALLBACK_TEXT
-    await api.answer_guest_query(gm.query_id, reply)
+    try:
+        await api.answer_guest_query(gm.query_id, reply, rich=True)
+    except TelegramError:
+        # Telegram rejected the Markdown -> resend as plain text so the user
+        # still gets an answer (sans formatting).
+        await api.answer_guest_query(gm.query_id, reply, rich=False)
 
     if full:
         await store.append(gm.chat_id, gm.user_id, "user", user_text)
