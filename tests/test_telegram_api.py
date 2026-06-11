@@ -16,7 +16,7 @@ async def test_answer_guest_query_sends_result_object():
         return httpx.Response(200, json=_ok({"inline_message_id": "abc"}))
 
     api = TelegramApi("123:abc", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
-    res = await api.answer_guest_query("q1", "hello")
+    res = await api.answer_guest_query("q1", "hello", rich=False)
     assert res == {"inline_message_id": "abc"}
     assert seen["url"].endswith("/bot123:abc/answerGuestQuery")
     body = seen["json"]
@@ -24,6 +24,37 @@ async def test_answer_guest_query_sends_result_object():
     # InputTextMessageContent.message_text carries the reply.
     assert b"q1" in body and b"hello" in body
     assert b"input_message_content" in body and b"message_text" in body
+    await api.close()
+
+
+async def test_answer_guest_query_rich_uses_rich_message_markdown():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["json"] = request.read()
+        return httpx.Response(200, json=_ok({"inline_message_id": "abc"}))
+
+    api = TelegramApi("123:abc", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    await api.answer_guest_query("q1", "**bold**", rich=True)
+    body = seen["json"]
+    # rich form: input_message_content carries an InputRichMessageContent
+    assert b"rich_message" in body and b"markdown" in body and b"**bold**" in body
+    assert b"message_text" not in body
+    await api.close()
+
+
+async def test_answer_guest_query_plain_uses_message_text():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["json"] = request.read()
+        return httpx.Response(200, json=_ok({"inline_message_id": "abc"}))
+
+    api = TelegramApi("123:abc", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    await api.answer_guest_query("q1", "plain text", rich=False)
+    body = seen["json"]
+    assert b"message_text" in body and b"plain text" in body
+    assert b"rich_message" not in body
     await api.close()
 
 

@@ -23,16 +23,21 @@ class TelegramApi:
         return data["result"]
 
     async def answer_guest_query(self, guest_query_id: str, text: str,
-                                 result_id: str = "1") -> object:
+                                 result_id: str = "1", rich: bool = True) -> object:
         # Bot API 10.0: answerGuestQuery takes a `result` (InlineQueryResult),
-        # NOT a plain `text`. We wrap the reply as an article whose message body
-        # is an InputTextMessageContent. Returns a SentGuestMessage (with
-        # inline_message_id), which can later be edited via editMessageText.
+        # NOT a plain `text`. We wrap the reply as an article. Bot API 10.1 lets
+        # the article's input_message_content be an InputRichMessageContent, so
+        # the LLM's Markdown is rendered by Telegram. `rich=False` falls back to a
+        # plain InputTextMessageContent when Telegram rejects the formatting.
+        if rich:
+            content = {"rich_message": {"markdown": text}}
+        else:
+            content = {"message_text": text}
         result = {
             "type": "article",
             "id": result_id,
             "title": "AI",
-            "input_message_content": {"message_text": text},
+            "input_message_content": content,
         }
         return await self.call("answerGuestQuery",
                                guest_query_id=guest_query_id, result=result)
