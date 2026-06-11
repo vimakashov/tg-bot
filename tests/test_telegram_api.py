@@ -105,6 +105,23 @@ async def test_send_business_message_posts_connection_chat_and_text():
     await api.close()
 
 
+async def test_send_rich_business_message_posts_rich_markdown():
+    seen = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        seen["json"] = request.read()
+        return httpx.Response(200, json=_ok({"message_id": 1}))
+
+    api = TelegramApi("123:abc", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    await api.send_rich_business_message("conn1", 999, "**hello there**")
+    assert seen["url"].endswith("/sendRichMessage")
+    body = seen["json"]
+    assert b"business_connection_id" in body and b"conn1" in body and b"999" in body
+    assert b"rich_message" in body and b"markdown" in body and b"**hello there**" in body
+    await api.close()
+
+
 async def test_set_webhook_includes_business_updates():
     seen = {}
 

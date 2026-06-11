@@ -55,6 +55,17 @@ class TelegramApi:
                                business_connection_id=business_connection_id,
                                chat_id=chat_id, text=text)
 
+    async def send_rich_business_message(self, business_connection_id: str, chat_id: int,
+                                         text: str) -> object:
+        # Bot API 10.1 Secretary mode: sendRichMessage with a business_connection_id
+        # sends AS the owner with Markdown rendered by Telegram. The LLM's Markdown
+        # goes straight into rich_message.markdown — no escaping. Same 24h-window /
+        # can_reply constraints as send_business_message; ok:false -> TelegramError.
+        return await self.call("sendRichMessage",
+                               business_connection_id=business_connection_id,
+                               chat_id=chat_id,
+                               rich_message={"markdown": text})
+
     async def set_webhook(self, url: str, secret_token: str) -> object:
         return await self.call("setWebhook", url=url, secret_token=secret_token,
                                allowed_updates=["guest_message", "message",
