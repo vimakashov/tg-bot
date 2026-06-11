@@ -116,8 +116,12 @@ async def handle_business_message(update: dict, api, ai, store, config) -> None:
     reply = full[:TELEGRAM_MAX]
     try:
         await api.send_rich_business_message(bm.connection_id, bm.chat_id, reply)
-    except TelegramError:
-        # Telegram rejected the Markdown -> resend as plain text (AS the owner).
+    except TelegramError as e:
+        # Telegram rejected the rich Markdown -> resend as plain text (AS the
+        # owner). Log the reason: a silent fallback would hide a systematically-
+        # failing rich path, which looks exactly like "no formatting".
+        log.warning("rich sendRichMessage rejected (chat %s), falling back to plain: %s",
+                    bm.chat_id, e)
         try:
             await api.send_business_message(bm.connection_id, bm.chat_id, reply)
         except Exception:

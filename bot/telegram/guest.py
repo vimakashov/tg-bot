@@ -90,9 +90,12 @@ async def handle_guest_message(update: dict, api, ai, store, config) -> None:
     reply = (full[:TELEGRAM_MAX]) if full else FALLBACK_TEXT
     try:
         await api.answer_guest_query(gm.query_id, reply, rich=True)
-    except TelegramError:
-        # Telegram rejected the Markdown -> resend as plain text so the user
-        # still gets an answer (sans formatting).
+    except TelegramError as e:
+        # Telegram rejected the rich Markdown -> resend as plain text so the user
+        # still gets an answer (sans formatting). Log the reason: a *silent*
+        # fallback would hide a systematically-failing rich path (e.g. an
+        # unsupported content shape), which looks exactly like "no formatting".
+        log.warning("rich answerGuestQuery rejected, falling back to plain: %s", e)
         await api.answer_guest_query(gm.query_id, reply, rich=False)
 
     if full:
