@@ -1,4 +1,5 @@
 import pytest
+from bot.telegram.api import TelegramError
 from bot.telegram.guest import (
     GuestMessage, parse_guest_message, strip_bot_mention, build_messages, handle_guest_message,
     FALLBACK_TEXT, CLEAR_REPLY, is_clear_command,
@@ -92,10 +93,15 @@ class FakeAI:
 
 
 class FakeApi:
-    def __init__(self):
-        self.answers = []
+    def __init__(self, rich_error=None):
+        self.answers = []      # (guest_query_id, text) for each successful answer
+        self.rich_flags = []   # the `rich` value passed on each call, in order
+        self._rich_error = rich_error
 
-    async def answer_guest_query(self, guest_query_id, text):
+    async def answer_guest_query(self, guest_query_id, text, rich=True):
+        self.rich_flags.append(rich)
+        if rich and self._rich_error:
+            raise self._rich_error
         self.answers.append((guest_query_id, text))
 
 
@@ -139,3 +145,14 @@ async def test_handler_truncates_to_4096():
     await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
     qid, text = api.answers[0]
     assert len(text) == 4096
+
+
+async def test_handler_falls_back_to_plain_on_rich_rejection():
+    store, ai = FakeStore(), FakeAI(["**Hi**"])
+    api = FakeApi(rich_error=TelegramError("can't parse markdown"))
+    await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
+    # rich attempted first (True), then retried as plain (False)
+    assert api.rich_flags == [True, False]
+    # the reply still reached the user, and history was persisted
+    assert api.answers == [("q1", "**Hi**")]
+    assert store.appended == [("user", "hi"), ("assistant", "**Hi**")]
