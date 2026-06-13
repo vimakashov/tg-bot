@@ -93,16 +93,34 @@ class FakeAI:
 
 
 class FakeApi:
-    def __init__(self, rich_error=None):
-        self.answers = []      # (guest_query_id, text) for each successful answer
-        self.rich_flags = []   # the `rich` value passed on each call, in order
+    def __init__(self, rich_error=None, edit_error=None):
+        self.answers = []        # (guest_query_id, text) for each successful answer
+        self.rich_flags = []     # the `rich` value passed to answer_guest_query, in order
+        self.edits = []          # (inline_message_id, text) for each successful edit
+        self.edit_attempts = 0   # count of edit calls, including failed ones
         self._rich_error = rich_error
+        self._edit_error = edit_error
 
     async def answer_guest_query(self, guest_query_id, text, rich=True):
         self.rich_flags.append(rich)
         if rich and self._rich_error:
             raise self._rich_error
         self.answers.append((guest_query_id, text))
+        return {"inline_message_id": "im-1"}
+
+    async def edit_inline_message_text(self, inline_message_id, text, rich=True):
+        self.edit_attempts += 1
+        if self._edit_error:
+            raise self._edit_error
+        self.edits.append((inline_message_id, text))
+        return True
+
+    @property
+    def final_text(self):
+        # what the user ultimately sees: the last successful edit, else the answer
+        if self.edits:
+            return self.edits[-1][1]
+        return self.answers[-1][1] if self.answers else None
 
 
 class Cfg:
@@ -112,11 +130,24 @@ class Cfg:
     system_prompt = TEST_PROMPT
 
 
-async def test_handler_accumulates_and_answers_once():
+async def test_handler_streams_then_finalizes_full_text():
+    # interval 0.0 -> emit on every chunk: first via answerGuestQuery, rest via edit
     store, ai, api = FakeStore(), FakeAI(["Hel", "lo!"]), FakeApi()
     await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
-    # guest mode: exactly one reply with the full concatenated text
+    # exactly one answer (the first chunk), sent rich, to obtain the inline id
+    assert api.answers == [("q1", "Hel")]
+    assert api.rich_flags == [True]
+    # at least one edit happened and the final visible text is the complete reply
+    assert api.edit_attempts >= 1
+    assert api.final_text == "Hello!"
+    assert store.appended == [("user", "hi"), ("assistant", "Hello!")]
+
+
+async def test_handler_single_chunk_answers_once():
+    store, ai, api = FakeStore(), FakeAI(["Hello!"]), FakeApi()
+    await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
     assert api.answers == [("q1", "Hello!")]
+    assert api.final_text == "Hello!"
     assert store.appended == [("user", "hi"), ("assistant", "Hello!")]
 
 
@@ -130,6 +161,7 @@ async def test_handler_sends_fallback_on_ai_error():
     store, ai, api = FakeStore(), FakeAI(error=RuntimeError("groq down")), FakeApi()
     await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
     assert api.answers == [("q1", FALLBACK_TEXT)]
+    assert store.appended == []  # nothing generated -> no history
 
 
 async def test_handler_clear_command_resets_and_skips_ai():
@@ -143,16 +175,27 @@ async def test_handler_clear_command_resets_and_skips_ai():
 async def test_handler_truncates_to_4096():
     store, ai, api = FakeStore(), FakeAI(["x" * 5000]), FakeApi()
     await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
-    qid, text = api.answers[0]
-    assert len(text) == 4096
+    assert len(api.final_text) == 4096
 
 
-async def test_handler_falls_back_to_plain_on_rich_rejection():
-    store, ai = FakeStore(), FakeAI(["**Hi**"])
+async def test_handler_initial_rich_rejection_falls_back_to_plain_oneshot():
+    store, ai = FakeStore(), FakeAI(["**Hi**", " there"])
     api = FakeApi(rich_error=TelegramError("can't parse markdown"))
     await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
-    # rich attempted first (True), then retried as plain (False)
+    # first emit tries rich (rejected), no edits happen; the drained full text is
+    # delivered via a single plain answer
     assert api.rich_flags == [True, False]
-    # the reply still reached the user, and history was persisted
-    assert api.answers == [("q1", "**Hi**")]
-    assert store.appended == [("user", "hi"), ("assistant", "**Hi**")]
+    assert api.edit_attempts == 0
+    assert api.answers == [("q1", "**Hi** there")]
+    assert store.appended == [("user", "hi"), ("assistant", "**Hi** there")]
+
+
+async def test_handler_swallows_transient_edit_failure_and_persists():
+    store, ai = FakeStore(), FakeAI(["A", "B", "C"])
+    api = FakeApi(edit_error=TelegramError("429 Too Many Requests"))
+    await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
+    # the first chunk was delivered via answerGuestQuery; edits were attempted but
+    # all failed and were swallowed; history is still persisted with the full text
+    assert api.answers == [("q1", "A")]
+    assert api.edit_attempts >= 1
+    assert store.appended == [("user", "hi"), ("assistant", "ABC")]
