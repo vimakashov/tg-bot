@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import time
 import re
 from dataclasses import dataclass
 
@@ -63,6 +64,86 @@ def build_messages(history: list[dict], user_text: str, reply_text: str | None,
     return messages
 
 
+async def _answer_oneshot(api, query_id: str, text: str) -> None:
+    """Single answerGuestQuery, rich-first with a plain retry on rejection.
+    Used when no streaming message was ever established (AI failure / empty
+    output)."""
+    try:
+        await api.answer_guest_query(query_id, text, rich=True)
+    except TelegramError as e:
+        log.warning("rich answerGuestQuery rejected, falling back to plain: %s", e)
+        await api.answer_guest_query(query_id, text, rich=False)
+
+
+async def stream_guest_reply(api, ai, messages, gm, store, user_text,
+                             interval, clock=time.monotonic) -> None:
+    """Stream the Groq reply live: deliver the first throttled chunk via
+    answerGuestQuery (capturing the inline_message_id) and edit that message on
+    each later throttled tick plus once at the end. On a rejected first rich send,
+    drain the stream and fall back to one plain answerGuestQuery. Edit failures
+    (429 / transient) are swallowed — the next tick or the final edit corrects the
+    displayed text. History is persisted only after a reply is delivered."""
+    inline_id = None
+    full = ""
+    last_emit = None
+    rich_rejected = False
+    last_shown = None
+
+    async def emit(text: str) -> None:
+        nonlocal inline_id, rich_rejected, last_shown
+        if rich_rejected:
+            return  # stop sending; finalize as a plain one-shot below
+        if inline_id is None:
+            try:
+                res = await api.answer_guest_query(gm.query_id, text, rich=True)
+                inline_id = (res or {}).get("inline_message_id")
+                last_shown = text
+            except TelegramError as e:
+                log.warning("rich answerGuestQuery rejected, falling back to plain: %s", e)
+                rich_rejected = True
+        else:
+            try:
+                await api.edit_inline_message_text(inline_id, text, rich=True)
+                last_shown = text
+            except Exception:
+                pass  # transient / 429: a later edit corrects the displayed text
+
+    try:
+        async for chunk in ai.stream_completion(messages):
+            full += chunk
+            now = clock()
+            if last_emit is None or (now - last_emit) >= interval:
+                await emit(full[:TELEGRAM_MAX])
+                last_emit = now
+    except Exception:
+        log.exception("AI generation failed")
+
+    if not full:
+        # Nothing generated -> visible fallback message (matches old behaviour).
+        await _answer_oneshot(api, gm.query_id, FALLBACK_TEXT)
+        return
+
+    reply = full[:TELEGRAM_MAX]
+    if rich_rejected:
+        # First rich send was already rejected for this recipient; deliver the
+        # complete text once as plain (no rich retry — we know it'll be rejected).
+        await api.answer_guest_query(gm.query_id, reply, rich=False)
+    elif inline_id is None:
+        # Defensive: no inline id was captured -> one-shot the full reply.
+        await _answer_oneshot(api, gm.query_id, reply)
+    else:
+        # Final edit with the complete text — skip if the last successful emit
+        # already showed it (avoids a spurious "message is not modified" warning).
+        if reply != last_shown:
+            try:
+                await api.edit_inline_message_text(inline_id, reply, rich=True)
+            except Exception:
+                log.warning("final editMessageText failed; message keeps last partial")
+
+    await store.append(gm.chat_id, gm.user_id, "user", user_text)
+    await store.append(gm.chat_id, gm.user_id, "assistant", full)
+
+
 async def handle_guest_message(update: dict, api, ai, store, config) -> None:
     gm = parse_guest_message(update)
     if gm is None:
@@ -75,29 +156,8 @@ async def handle_guest_message(update: dict, api, ai, store, config) -> None:
     history = await store.get_history(gm.chat_id, gm.user_id, config.context_messages)
     messages = build_messages(history, user_text, gm.reply_text, config.system_prompt)
 
-    # Guest mode allows exactly ONE reply, delivered via answerGuestQuery as a
-    # single inline message — there is no per-token draft streaming here
-    # (sendMessageDraft is a private-chat/member-mode feature). So we accumulate
-    # the full Groq response, then answer once.
-    try:
-        full = ""
-        async for chunk in ai.stream_completion(messages):
-            full += chunk
-    except Exception:
-        log.exception("AI generation failed")
-        full = ""
-
-    reply = (full[:TELEGRAM_MAX]) if full else FALLBACK_TEXT
-    try:
-        await api.answer_guest_query(gm.query_id, reply, rich=True)
-    except TelegramError as e:
-        # Telegram rejected the rich Markdown -> resend as plain text so the user
-        # still gets an answer (sans formatting). Log the reason: a *silent*
-        # fallback would hide a systematically-failing rich path (e.g. an
-        # unsupported content shape), which looks exactly like "no formatting".
-        log.warning("rich answerGuestQuery rejected, falling back to plain: %s", e)
-        await api.answer_guest_query(gm.query_id, reply, rich=False)
-
-    if full:
-        await store.append(gm.chat_id, gm.user_id, "user", user_text)
-        await store.append(gm.chat_id, gm.user_id, "assistant", full)
+    # Stream the reply live: first chunk via answerGuestQuery, then edit that
+    # message until generation completes. Falls back to a one-shot answer if the
+    # rich path is rejected. See stream_guest_reply.
+    await stream_guest_reply(api, ai, messages, gm, store, user_text,
+                             config.stream_interval)

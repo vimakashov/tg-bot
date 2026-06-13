@@ -42,7 +42,16 @@ class TelegramApi:
         return await self.call("answerGuestQuery",
                                guest_query_id=guest_query_id, result=result)
 
-    async def edit_inline_message_text(self, inline_message_id: str, text: str) -> object:
+    async def edit_inline_message_text(self, inline_message_id: str, text: str,
+                                       rich: bool = True) -> object:
+        # Bot API 10.1: editMessageText takes a `rich_message` (InputRichMessage)
+        # OR a plain `text` — exactly one. rich=True passes the LLM Markdown
+        # verbatim into rich_message.markdown (no escaping); rich=False sends plain
+        # text for the per-recipient RICH_MESSAGE_UNSUPPORTED fallback.
+        if rich:
+            return await self.call("editMessageText",
+                                   inline_message_id=inline_message_id,
+                                   rich_message={"markdown": text})
         return await self.call("editMessageText",
                                inline_message_id=inline_message_id, text=text)
 
