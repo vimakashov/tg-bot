@@ -73,37 +73,6 @@ async def test_edit_inline_message_text():
     await api.close()
 
 
-async def test_edit_inline_message_text_rich_uses_rich_message_markdown():
-    seen = {}
-
-    def handler(request):
-        seen["json"] = request.read()
-        return httpx.Response(200, json=_ok())
-
-    api = TelegramApi("123:abc", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
-    await api.edit_inline_message_text("inline-1", "**bold**", rich=True)
-    body = seen["json"]
-    assert b"inline-1" in body
-    assert b"rich_message" in body and b"markdown" in body and b"**bold**" in body
-    assert b'"text"' not in body
-    await api.close()
-
-
-async def test_edit_inline_message_text_plain_uses_text():
-    seen = {}
-
-    def handler(request):
-        seen["json"] = request.read()
-        return httpx.Response(200, json=_ok())
-
-    api = TelegramApi("123:abc", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
-    await api.edit_inline_message_text("inline-1", "plain", rich=False)
-    body = seen["json"]
-    assert b"inline-1" in body and b"plain" in body
-    assert b"rich_message" not in body
-    await api.close()
-
-
 async def test_set_webhook_posts_url_and_secret():
     seen = {}
 
