@@ -12,6 +12,10 @@ class TelegramApi:
         self._client = http_client or httpx.AsyncClient(timeout=30)
 
     async def call(self, method: str, **params) -> object:
+        if "chat_id" in params:
+            params["chat_id"] = int(params["chat_id"])
+        if "draft_id" in params:
+            params["draft_id"] = int(params["draft_id"])
         payload = {k: v for k, v in params.items() if v is not None}
         try:
             resp = await self._client.post(f"{self._base}/{method}", json=payload)
@@ -69,7 +73,7 @@ class TelegramApi:
     async def send_rich_message(self, chat_id: int, text: str):
         return await self.call("sendRichMessage", 
                                 chat_id=chat_id, 
-                                input_message_content={"rich_message": {"markdown": text}})
+                                rich_message={"markdown": text})
 
     async def send_message(self, chat_id: int, text: str) -> object:
         return await self.call("sendMessage", chat_id=chat_id, text=text)
@@ -80,7 +84,7 @@ class TelegramApi:
         return await self.call("sendRichMessageDraft",
                                 chat_id=chat_id,
                                 draft_id=draft_id,
-                                input_message_content={"rich_message": {"markdown": text}})
+                                rich_message={"markdown": text})
 
     async def set_webhook(self, url: str, secret_token: str) -> object:
         return await self.call("setWebhook", url=url, secret_token=secret_token,

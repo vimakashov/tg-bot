@@ -36,8 +36,8 @@ def parse_guest_message(update: dict) -> GuestMessage | None:
     reply = gm.get("reply_to_message") or {}
     return GuestMessage(
         query_id=gm["guest_query_id"],
-        chat_id=gm["chat"]["id"],
-        user_id=gm["from"]["id"],
+        chat_id=int(gm["chat"]["id"]),
+        user_id=int(gm["from"]["id"]),
         text=gm.get("text", ""),
         reply_text=reply.get("text"),
     )
@@ -83,29 +83,27 @@ async def stream_guest_reply(gm: GuestMessage, api, ai, store, config) -> None:
     messages = build_messages(history, user_text, gm.reply_text, config.system_prompt)
     
     full_text = ""
-    draft_id = time.time_ns()
     
     try:
         async for chunk in ai.stream_completion(messages):
             full_text += chunk
-            await api.send_rich_message_draft(gm.chat_id, draft_id, full_text)
-            
-        if full_text:
-            await api.send_rich_message(gm.chat_id, full_text)
+        
+        if full_text.strip():
+            # For Guest Mode, we must use answer_guest_query with the full text.
+            # We cannot stream edits because Guest Mode doesn't support them.
+            await api.answer_guest_query(gm.query_id, full_text)
             await store.append(gm.chat_id, gm.user_id, "user", user_text)
             await store.append(gm.chat_id, gm.user_id, "assistant", full_text)
-            
+        
     except Exception as e:
-        log.exception("Streaming guest reply failed: %s", e)
+        log.exception("Guest reply failed: %s", e)
         if full_text:
-            # Fallback to plain text if something went wrong after some text was generated
             try:
-                await api.send_message(gm.chat_id, full_text)
+                await api.answer_guest_query(gm.query_id, full_text)
             except Exception:
                 pass
         else:
-            # If no text was generated, send fallback
             try:
-                await api.answer_guest_query(gm.query_id, FALLBACK_TEXT, rich=False)
+                await api.answer_guest_query(gm.query_id, FALLBACK_TEXT)
             except Exception:
                 pass
