@@ -2,7 +2,6 @@ import httpx
 import pytest
 from bot.telegram.api import TelegramApi, TelegramError
 
-
 def _ok(result=True):
     return {"ok": True, "result": result}
 
@@ -145,4 +144,28 @@ async def test_raises_on_not_ok():
     api = TelegramApi("123:abc", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     with pytest.raises(TelegramError):
         await api.answer_guest_query("q1", "hi")
+    await api.close()
+
+
+import httpx
+from bot.telegram.api import TelegramApi
+
+async def test_send_rich_message_draft_payload():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["json"] = request.read()
+        return httpx.Response(200, json=_ok(True))
+
+    api = TelegramApi("test_token", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    
+    await api.send_rich_message_draft(chat_id=123, draft_id=456, text="hello")
+    
+    # Verify the last request sent to the mock transport
+    assert "sendRichMessageDraft" in seen["url"]
+    body = seen["json"]
+    assert b"chat_id" in body and b"123" in body
+    assert b"draft_id" in body and b"456" in body
+    assert b"input_message_content" in body and b"rich_message" in body and b"markdown" in body and b"hello" in body
     await api.close()

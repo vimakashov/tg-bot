@@ -44,27 +44,33 @@ class TelegramApi:
 
     async def edit_inline_message_text(self, inline_message_id: str, text: str) -> object:
         return await self.call("editMessageText",
-                               inline_message_id=inline_message_id, text=text)
+                                inline_message_id=inline_message_id, text=text)
 
     async def send_business_message(self, business_connection_id: str, chat_id: int,
-                                    text: str) -> object:
+                                   text: str) -> object:
         # Secretary mode: standard sendMessage with a business_connection_id sends
         # the message AS the owner. The chat must have been active in the last 24h
         # and the connection's can_reply must be true, or the API returns ok:false.
         return await self.call("sendMessage",
-                               business_connection_id=business_connection_id,
-                               chat_id=chat_id, text=text)
+                                business_connection_id=business_connection_id,
+                                chat_id=chat_id, text=text)
 
     async def send_rich_business_message(self, business_connection_id: str, chat_id: int,
-                                         text: str) -> object:
+                                          text: str) -> object:
         # Bot API 10.1 Secretary mode: sendRichMessage with a business_connection_id
         # sends AS the owner with Markdown rendered by Telegram. The LLM's Markdown
         # goes straight into rich_message.markdown — no escaping. Same 24h-window /
         # can_reply constraints as send_business_message; ok:false -> TelegramError.
         return await self.call("sendRichMessage",
-                               business_connection_id=business_connection_id,
+                                business_connection_id=business_connection_id,
+                                chat_id=chat_id,
+                                rich_message={"markdown": text})
+
+    async def send_rich_message_draft(self, chat_id: int, draft_id: int, text: str):
+        return await self.call("sendRichMessageDraft",
                                chat_id=chat_id,
-                               rich_message={"markdown": text})
+                               draft_id=draft_id,
+                               input_message_content={"rich_message": {"markdown": text}})
 
     async def set_webhook(self, url: str, secret_token: str) -> object:
         return await self.call("setWebhook", url=url, secret_token=secret_token,
