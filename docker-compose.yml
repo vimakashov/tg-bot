@@ -14,11 +14,20 @@ services:
       - bot
     ports:
       - "80:80"
-      - "443:443"
+      - "4443:443"
     environment:
       WEBHOOK_DOMAIN: ${WEBHOOK_DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./caddy_data:/data
       - ./caddy_config:/config
+    restart: unless-stopped
+
+  ngrok:
+    image: ngrok/ngrok
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    command:
+      - http
+      - caddy:80
     restart: unless-stopped
