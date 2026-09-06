@@ -91,9 +91,13 @@ async def stream_guest_reply(gm: GuestMessage, api, ai, store, config) -> None:
         if full_text.strip():
             # For Guest Mode, we must use answer_guest_query with the full text.
             # We cannot stream edits because Guest Mode doesn't support them.
-            await api.answer_guest_query(gm.query_id, full_text)
+            truncated = full_text[:TELEGRAM_MAX]
+            try:
+                await api.answer_guest_query(gm.query_id, truncated)
+            except TelegramError:
+                await api.answer_guest_query(gm.query_id, truncated, rich=False)
             await store.append(gm.chat_id, gm.user_id, "user", user_text)
-            await store.append(gm.chat_id, gm.user_id, "assistant", full_text)
+            await store.append(gm.chat_id, gm.user_id, "assistant", truncated)
         
     except Exception as e:
         log.exception("Guest reply failed: %s", e)
