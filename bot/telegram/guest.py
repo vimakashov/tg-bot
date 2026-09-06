@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import re
+import time
 from dataclasses import dataclass
 
 from bot.telegram.api import TelegramError
@@ -72,32 +73,39 @@ async def handle_guest_message(update: dict, api, ai, store, config) -> None:
         await store.clear(gm.chat_id, gm.user_id)
         await api.answer_guest_query(gm.query_id, CLEAR_REPLY, rich=False)
         return
+    
+    await stream_guest_reply(gm, api, ai, store, config)
+
+
+async def stream_guest_reply(gm: GuestMessage, api, ai, store, config) -> None:
+    user_text = strip_bot_mention(gm.text, config.bot_username)
     history = await store.get_history(gm.chat_id, gm.user_id, config.context_messages)
     messages = build_messages(history, user_text, gm.reply_text, config.system_prompt)
-
-    # Guest mode allows exactly ONE reply, delivered via answerGuestQuery as a
-    # single inline message — there is no per-token draft streaming here
-    # (sendMessageDraft is a private-chat/member-mode feature). So we accumulate
-    # the full Groq response, then answer once.
+    
+    full_text = ""
+    draft_id = time.time_ns()
+    
     try:
-        full = ""
         async for chunk in ai.stream_completion(messages):
-            full += chunk
-    except Exception:
-        log.exception("AI generation failed")
-        full = ""
-
-    reply = (full[:TELEGRAM_MAX]) if full else FALLBACK_TEXT
-    try:
-        await api.answer_guest_query(gm.query_id, reply, rich=True)
-    except TelegramError as e:
-        # Telegram rejected the rich Markdown -> resend as plain text so the user
-        # still gets an answer (sans formatting). Log the reason: a *silent*
-        # fallback would hide a systematically-failing rich path (e.g. an
-        # unsupported content shape), which looks exactly like "no formatting".
-        log.warning("rich answerGuestQuery rejected, falling back to plain: %s", e)
-        await api.answer_guest_query(gm.query_id, reply, rich=False)
-
-    if full:
-        await store.append(gm.chat_id, gm.user_id, "user", user_text)
-        await store.append(gm.chat_id, gm.user_id, "assistant", full)
+            full_text += chunk
+            await api.send_rich_message_draft(gm.chat_id, draft_id, full_text)
+            
+        if full_text:
+            await api.send_rich_message(gm.chat_id, full_text)
+            await store.append(gm.chat_id, gm.user_id, "user", user_text)
+            await store.append(gm.chat_id, gm.user_id, "assistant", full_text)
+            
+    except Exception as e:
+        log.exception("Streaming guest reply failed: %s", e)
+        if full_text:
+            # Fallback to plain text if something went wrong after some text was generated
+            try:
+                await api.send_message(gm.chat_id, full_text)
+            except Exception:
+                pass
+        else:
+            # If no text was generated, send fallback
+            try:
+                await api.answer_guest_query(gm.query_id, FALLBACK_TEXT, rich=False)
+            except Exception:
+                pass

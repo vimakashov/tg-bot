@@ -71,6 +71,11 @@ class TelegramApi:
                                 chat_id=chat_id, 
                                 input_message_content={"rich_message": {"markdown": text}})
 
+    async def send_message(self, chat_id: int, text: str) -> object:
+        return await self.call("sendMessage", chat_id=chat_id, text=text)
+
+
+
     async def send_rich_message_draft(self, chat_id: int, draft_id: int, text: str):
         return await self.call("sendRichMessageDraft",
                                 chat_id=chat_id,
