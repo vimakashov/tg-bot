@@ -47,7 +47,7 @@ class TelegramApi:
                                 inline_message_id=inline_message_id, text=text)
 
     async def send_business_message(self, business_connection_id: str, chat_id: int,
-                                   text: str) -> object:
+                                    text: str) -> object:
         # Secretary mode: standard sendMessage with a business_connection_id sends
         # the message AS the owner. The chat must have been active in the last 24h
         # and the connection's can_reply must be true, or the API returns ok:false.
@@ -66,16 +66,21 @@ class TelegramApi:
                                 chat_id=chat_id,
                                 rich_message={"markdown": text})
 
+    async def send_rich_message(self, chat_id: int, text: str):
+        return await self.call("sendRichMessage", 
+                                chat_id=chat_id, 
+                                input_message_content={"rich_message": {"markdown": text}})
+
     async def send_rich_message_draft(self, chat_id: int, draft_id: int, text: str):
         return await self.call("sendRichMessageDraft",
-                               chat_id=chat_id,
-                               draft_id=draft_id,
-                               input_message_content={"rich_message": {"markdown": text}})
+                                chat_id=chat_id,
+                                draft_id=draft_id,
+                                input_message_content={"rich_message": {"markdown": text}})
 
     async def set_webhook(self, url: str, secret_token: str) -> object:
         return await self.call("setWebhook", url=url, secret_token=secret_token,
-                               allowed_updates=["guest_message", "message",
-                                                "business_connection", "business_message"])
+                                allowed_updates=["guest_message", "message",
+                                                 "business_connection", "business_message"])
 
     async def close(self) -> None:
         await self._client.aclose()
