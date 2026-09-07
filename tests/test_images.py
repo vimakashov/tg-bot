@@ -283,3 +283,115 @@ async def test_send_photo_with_business_connection_id():
     assert result is True
     payload = captured_payloads[0]
     assert payload["business_connection_id"] == "conn1"
+
+
+import asyncio
+import time
+from bot.telegram.images import upload_images_to_telegram
+
+
+async def test_upload_images_to_telegram_empty_list():
+    api = unittest.mock.AsyncMock()
+    result = await upload_images_to_telegram(api, 123, [])
+    assert result == []
+    api.resolve_image_url.assert_not_called()
+
+
+async def test_upload_images_to_telegram_all_succeed():
+    mock_api = unittest.mock.AsyncMock()
+
+    async def mock_resolve(image_id):
+        return f"https://cdn.example.com/{image_id}.jpg"
+
+    async def mock_upload(chat_id, url, business_connection_id=None):
+        fid = url.split("/")[-1].replace(".jpg", "")
+        return f"file_{fid}"
+
+    mock_api.resolve_image_url.side_effect = mock_resolve
+    mock_api.upload_photo_from_url.side_effect = mock_upload
+
+    result = await upload_images_to_telegram(mock_api, 123, ["img1", "img2"])
+    assert result == ["file_img1", "file_img2"]
+
+
+async def test_upload_images_to_telegram_partial_failure():
+    """Some images resolve/upload successfully, others fail."""
+    mock_api = unittest.mock.AsyncMock()
+
+    async def mock_resolve(image_id):
+        if image_id == "fail1":
+            return None
+        return f"https://cdn.example.com/{image_id}.jpg"
+
+    async def mock_upload(chat_id, url, business_connection_id=None):
+        fid = url.split("/")[-1].replace(".jpg", "")
+        if "fail" in fid:
+            return None
+        return f"file_{fid}"
+
+    mock_api.resolve_image_url.side_effect = mock_resolve
+    mock_api.upload_photo_from_url.side_effect = mock_upload
+
+    result = await upload_images_to_telegram(mock_api, 123, ["good1", "fail1", "good2"])
+    assert result == ["file_good1", "file_good2"]
+
+
+async def test_upload_images_to_telegram_all_fail():
+    """All images fail — returns empty list."""
+    mock_api = unittest.mock.AsyncMock()
+
+    async def mock_resolve(image_id):
+        return None
+
+    mock_api.resolve_image_url.side_effect = mock_resolve
+
+    result = await upload_images_to_telegram(mock_api, 123, ["img1", "img2"])
+    assert result == []
+
+
+async def test_upload_images_to_telegram_with_business_connection_id():
+    """business_connection_id is passed through to upload_photo_from_url."""
+    mock_api = unittest.mock.AsyncMock()
+
+    async def mock_resolve(image_id):
+        return f"https://cdn.example.com/{image_id}.jpg"
+
+    async def mock_upload(chat_id, url, business_connection_id=None):
+        fid = url.split("/")[-1].replace(".jpg", "")
+        return f"file_{fid}"
+
+    mock_api.resolve_image_url.side_effect = mock_resolve
+    mock_api.upload_photo_from_url.side_effect = mock_upload
+
+    result = await upload_images_to_telegram(
+        mock_api, 123, ["img1"], business_connection_id="conn1"
+    )
+    assert result == ["file_img1"]
+
+    call_kwargs = mock_api.upload_photo_from_url.call_args
+    assert call_kwargs[1]["business_connection_id"] == "conn1"
+
+
+async def test_upload_images_to_telegram_concurrency():
+    """Images are processed concurrently (via asyncio.gather with semaphore)."""
+    mock_api = unittest.mock.AsyncMock()
+
+    async def slow_resolve(image_id):
+        await asyncio.sleep(0.05)
+        return f"https://cdn.example.com/{image_id}.jpg"
+
+    async def slow_upload(chat_id, url, business_connection_id=None):
+        await asyncio.sleep(0.05)
+        fid = url.split("/")[-1].replace(".jpg", "")
+        return f"file_{fid}"
+
+    mock_api.resolve_image_url.side_effect = slow_resolve
+    mock_api.upload_photo_from_url.side_effect = slow_upload
+
+    start = time.monotonic()
+    result = await upload_images_to_telegram(mock_api, 123, ["img1", "img2", "img3"])
+    elapsed = time.monotonic() - start
+
+    assert result == ["file_img1", "file_img2", "file_img3"]
+    # With concurrency=5, 3 images should complete in ~0.1s total, not 0.3s sequential
+    assert elapsed < 0.2, f"Expected concurrent execution (<0.2s), got {elapsed:.2f}s"
