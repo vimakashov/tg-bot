@@ -49,6 +49,9 @@ class FakeApi:
         self.plain_sent = []   # every plain attempt
         self._error = error
         self._rich_error = rich_error
+        # Image support tracking
+        self.resolve_called = []    # list of image_ids resolved
+        self.upload_calls = []      # list of (chat_id, url, business_connection_id)
 
     async def send_rich_business_message(self, business_connection_id, chat_id, text):
         self.rich_sent.append((business_connection_id, chat_id, text))
@@ -61,6 +64,14 @@ class FakeApi:
         if self._error:
             raise self._error
         self.sent.append((business_connection_id, chat_id, text))
+
+    async def resolve_image_url(self, image_id):
+        self.resolve_called.append(image_id)
+        return f"https://cdn.example.com/{image_id}.jpg"
+
+    async def upload_photo_from_url(self, chat_id, url, business_connection_id=None):
+        self.upload_calls.append((chat_id, url, business_connection_id))
+        return f"file_{url.split('/')[-1]}"
 
 
 BUSINESS_PROMPT = "Reply as the owner."
@@ -253,3 +264,32 @@ async def test_business_truncates_to_4096():
     await handle_business_message(_msg_update(from_id=999, text="hi"), api, ai, store, Cfg())
     _, _, text = api.sent[0]
     assert len(text) == 4096
+
+
+async def test_business_handler_sends_clean_text_and_triggers_image_upload():
+    """When response contains [[img:id]] placeholders, text is cleaned and images are uploaded with business_connection_id."""
+    store = FakeStore(connection=_enabled_conn())
+    ai, api = FakeAI(["Photo: [[img:def456]]"]), FakeApi()
+    await handle_business_message(_msg_update(from_id=999, text="hi"), api, ai, store, Cfg())
+
+    # Clean text sent (placeholder removed)
+    assert api.sent == [("conn1", 999, "Photo: ")]
+
+    # Image upload was triggered with business_connection_id
+    assert api.resolve_called == ["def456"]
+    assert len(api.upload_calls) == 1
+    chat_id, url, conn_id = api.upload_calls[0]
+    assert chat_id == 999
+    assert "def456" in url
+    assert conn_id == "conn1"
+
+
+async def test_business_no_image_upload_when_no_placeholders():
+    """When response has no placeholders, no image upload is triggered."""
+    store = FakeStore(connection=_enabled_conn())
+    ai, api = FakeAI(["Hello world"]), FakeApi()
+    await handle_business_message(_msg_update(from_id=999, text="hi"), api, ai, store, Cfg())
+
+    assert api.sent == [("conn1", 999, "Hello world")]
+    assert api.resolve_called == []
+    assert api.upload_calls == []
