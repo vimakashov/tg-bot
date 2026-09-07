@@ -52,14 +52,11 @@ async def resolve_image_url(image_base_url: str | None, image_id: str,
     return str(thumbnail)
 
 
-async def upload_images_to_telegram(api, chat_id: int, image_ids: list[str],
-                                      business_connection_id: str | None = None,
-                                      image_base_url: str | None = None,
-                                      http_client: httpx.AsyncClient | None = None) -> list[str]:
-    """Resolve image URLs and send them as separate text messages.
+async def resolve_image_urls(image_ids: list[str], image_base_url: str | None = None,
+                              http_client: httpx.AsyncClient | None = None) -> list[str]:
+    """Resolve image IDs to thumbnail URLs.
 
-    For each image ID, resolves the thumbnail URL via the JSON endpoint,
-    then sends it as a plain text message (not a photo upload).
+    Returns list of successful URL strings in the same order as input IDs.
     Failed resolutions are logged and skipped.
     """
     if not image_ids:
@@ -67,21 +64,12 @@ async def upload_images_to_telegram(api, chat_id: int, image_ids: list[str],
 
     semaphore = asyncio.Semaphore(5)
 
-    async def send_one(image_id: str) -> bool:
+    async def resolve_one(image_id: str) -> str | None:
         url = await resolve_image_url(image_base_url, image_id, http_client=http_client)
         if url is None:
             log.warning("resolve_image_url returned None for %s", image_id)
-            return False
-        try:
-            kwargs = {"chat_id": chat_id, "text": url}
-            if business_connection_id is not None:
-                kwargs["business_connection_id"] = business_connection_id
-            await api.call("sendMessage", **kwargs)
-            log.info("Sent image URL for %s to chat %s", image_id, chat_id)
-            return True
-        except Exception:
-            log.warning("sendMessage failed for image %s", image_id)
-            return False
+            return None
+        return url
 
-    results = await asyncio.gather(*(send_one(id_) for id_ in image_ids))
-    return [image_ids[i] for i, ok in enumerate(results) if ok]
+    results = await asyncio.gather(*(resolve_one(id_) for id_ in image_ids))
+    return [url for url in results if url is not None]

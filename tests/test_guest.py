@@ -107,9 +107,11 @@ class FakeApi:
         )
 
 
+import unittest.mock
+
+
 def _mock_image_response(url):
     """Return a mock httpx.Response with thumbnail for the given image URL."""
-    import unittest.mock
     # Extract image_id from URL like "http://test.example.com/images/abc123.json"
     parts = url.rstrip("/").split("/")
     image_id = parts[-1].replace(".json", "")
@@ -124,10 +126,9 @@ class FakeApi:
         self.answers = []      # (guest_query_id, text) for each successful answer
         self.rich_flags = []   # the `rich` value passed on each call, in order
         self._rich_error = rich_error
-        # Image support tracking: tracks sendMessage calls made by images module
-        self.image_messages = []  # list of (chat_id, text) sent via sendMessage
+        # Image support tracking: resolved URLs appended to text
+        self.image_urls = []  # list of all resolved image URLs
         # http_client stub for image resolution
-        import unittest.mock
         self._http_client = unittest.mock.MagicMock()
         self._http_client.get = unittest.mock.AsyncMock(
             side_effect=_mock_image_response
@@ -138,12 +139,6 @@ class FakeApi:
         if rich and self._rich_error:
             raise self._rich_error
         self.answers.append((guest_query_id, text))
-
-    async def call(self, method, **kwargs):
-        if method == "sendMessage":
-            chat_id = kwargs.get("chat_id")
-            text = kwargs.get("text", "")
-            self.image_messages.append((chat_id, text))
 
 
 class Cfg:
@@ -201,39 +196,32 @@ async def test_handler_falls_back_to_plain_on_rich_rejection():
 
 
 async def test_handler_sends_clean_text_and_triggers_image_upload():
-    """When response contains [[img:id]] placeholders, text is cleaned and image URLs are sent."""
+    """When response contains [[img:id]] placeholders, text is cleaned and image URLs are appended."""
     store, ai = FakeStore(), FakeAI(["Photo: [[img:abc123]]"])
     api = FakeApi()
     await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
 
-    # Clean text sent (placeholder removed)
-    assert api.answers == [("q1", "Photo: ")]
-
-    # Image URL sent as a separate message via sendMessage
-    assert len(api.image_messages) == 1
-    chat_id, url = api.image_messages[0]
-    assert chat_id == 42  # from _update fixture
-    assert "abc123" in url
+    # Clean text sent with image URL appended (as markdown link)
+    qid, text = api.answers[0]
+    assert "Photo:" in text  # placeholder removed, no trailing space
+    assert "https://cdn.example.com/abc123.jpg" in text
 
 
 async def test_handler_no_image_upload_when_no_placeholders():
-    """When response has no placeholders, no image URL message is triggered."""
+    """When response has no placeholders, no image URL is appended."""
     store, ai = FakeStore(), FakeAI(["Hello world"])
     api = FakeApi()
     await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
 
     assert api.answers == [("q1", "Hello world")]
-    assert api.image_messages == []
 
 
 async def test_handler_sends_multiple_images():
-    """Multiple image placeholders trigger multiple URL messages."""
+    """Multiple image placeholders trigger multiple URL appends."""
     store, ai = FakeStore(), FakeAI("[[img:first]] and [[img:second]]")
     api = FakeApi()
     await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
 
-    assert api.answers == [("q1", " and ")]
-    assert len(api.image_messages) == 2
-    urls = [msg[1] for msg in api.image_messages]
-    assert any("first" in u for u in urls)
-    assert any("second" in u for u in urls)
+    qid, text = api.answers[0]
+    assert "https://cdn.example.com/first.jpg" in text
+    assert "https://cdn.example.com/second.jpg" in text

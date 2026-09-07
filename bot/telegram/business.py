@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from bot.telegram.api import TelegramError
 from bot.telegram.guest import build_messages, TELEGRAM_MAX
-from bot.telegram.images import parse_images, upload_images_to_telegram
+from bot.telegram.images import parse_images, resolve_image_urls
 
 log = logging.getLogger("tgbot.business")
 
@@ -118,6 +118,16 @@ async def handle_business_message(update: dict, api, ai, store, config) -> None:
     clean_text, image_ids = parse_images(full)
     reply = clean_text[:TELEGRAM_MAX]
 
+    # Resolve image URLs and append to text before sending.
+    if image_ids:
+        resolved = await resolve_image_urls(
+            image_ids,
+            image_base_url=config.image_base_url,
+            http_client=api._http_client,
+        )
+        if resolved:
+            reply = reply.rstrip() + "\n\n".join(f"![{i+1}]({url})" for i, url in enumerate(resolved))
+
     try:
         await api.send_rich_business_message(bm.connection_id, bm.chat_id, reply)
     except TelegramError as e:
@@ -134,15 +144,6 @@ async def handle_business_message(update: dict, api, ai, store, config) -> None:
     except Exception:
         log.exception("send_rich_business_message failed (chat %s)", bm.chat_id)
         return
-
-    # Upload any images referenced in the response.
-    if image_ids:
-        await upload_images_to_telegram(
-            api, bm.chat_id, image_ids,
-            business_connection_id=bm.connection_id,
-            image_base_url=config.image_base_url,
-            http_client=api._http_client,
-        )
 
     # Persist only on a successful send (mirrors the guest path).
     await store.append_business(bm.connection_id, bm.chat_id, "user", bm.text)

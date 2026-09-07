@@ -42,6 +42,9 @@ class FakeAI:
             yield c
 
 
+BUSINESS_PROMPT = "Reply as the owner."
+
+
 class FakeApi:
     def __init__(self, error=None, rich_error=None):
         self.sent = []         # successful sends (rich or plain): (conn, chat, text)
@@ -49,9 +52,7 @@ class FakeApi:
         self.plain_sent = []   # every plain attempt
         self._error = error
         self._rich_error = rich_error
-        # Image support tracking: tracks sendMessage calls made by images module
-        self.image_messages = []  # list of (chat_id, text) sent via sendMessage
-        # http_client stub for image resolution
+        # Image support tracking: resolved URLs appended to text
         import unittest.mock
         self._http_client = unittest.mock.MagicMock()
         self._http_client.get = unittest.mock.AsyncMock(
@@ -70,12 +71,6 @@ class FakeApi:
             raise self._error
         self.sent.append((business_connection_id, chat_id, text))
 
-    async def call(self, method, **kwargs):
-        if method == "sendMessage":
-            chat_id = kwargs.get("chat_id")
-            text = kwargs.get("text", "")
-            self.image_messages.append((chat_id, text))
-
 
 def _mock_image_response(url):
     """Return a mock httpx.Response with thumbnail for the given image URL."""
@@ -87,9 +82,6 @@ def _mock_image_response(url):
     mock_resp.status_code = 200
     mock_resp.json.return_value = {"thumbnail": f"https://cdn.example.com/{image_id}.jpg"}
     return mock_resp
-
-
-BUSINESS_PROMPT = "Reply as the owner."
 
 
 class Cfg:
@@ -283,26 +275,21 @@ async def test_business_truncates_to_4096():
 
 
 async def test_business_handler_sends_clean_text_and_triggers_image_upload():
-    """When response contains [[img:id]] placeholders, text is cleaned and image URLs are sent."""
+    """When response contains [[img:id]] placeholders, text is cleaned and image URLs are appended."""
     store = FakeStore(connection=_enabled_conn())
     ai, api = FakeAI(["Photo: [[img:def456]]"]), FakeApi()
     await handle_business_message(_msg_update(from_id=999, text="hi"), api, ai, store, Cfg())
 
-    # Clean text sent (placeholder removed)
-    assert api.sent == [("conn1", 999, "Photo: ")]
-
-    # Image URL sent as a separate message via sendMessage
-    assert len(api.image_messages) == 1
-    chat_id, url = api.image_messages[0]
-    assert chat_id == 999
-    assert "def456" in url
+    # Clean text sent with image URL appended (as markdown link)
+    _, _, text = api.sent[0]
+    assert "Photo:" in text  # placeholder removed
+    assert "https://cdn.example.com/def456.jpg" in text
 
 
 async def test_business_no_image_upload_when_no_placeholders():
-    """When response has no placeholders, no image URL message is triggered."""
+    """When response has no placeholders, no image URL is appended."""
     store = FakeStore(connection=_enabled_conn())
     ai, api = FakeAI(["Hello world"]), FakeApi()
     await handle_business_message(_msg_update(from_id=999, text="hi"), api, ai, store, Cfg())
 
     assert api.sent == [("conn1", 999, "Hello world")]
-    assert api.image_messages == []

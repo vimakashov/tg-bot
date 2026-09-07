@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 
 from bot.telegram.api import TelegramError
-from bot.telegram.images import parse_images, upload_images_to_telegram
+from bot.telegram.images import parse_images, resolve_image_urls
 
 log = logging.getLogger("tgbot.guest")
 
@@ -93,18 +93,21 @@ async def stream_guest_reply(gm: GuestMessage, api, ai, store, config) -> None:
             # Parse image placeholders from the response text.
             clean_text, image_ids = parse_images(full_text)
             truncated = clean_text[:TELEGRAM_MAX]
+
+            # Resolve image URLs and append to text before sending.
+            if image_ids:
+                resolved = await resolve_image_urls(
+                    image_ids,
+                    image_base_url=config.image_base_url,
+                    http_client=api._http_client,
+                )
+                if resolved:
+                    truncated = truncated.rstrip() + "\n\n".join(f"![{i+1}]({url})" for i, url in enumerate(resolved))
+
             try:
                 await api.answer_guest_query(gm.query_id, truncated)
             except TelegramError:
                 await api.answer_guest_query(gm.query_id, truncated, rich=False)
-
-            # Upload any images referenced in the response.
-            if image_ids:
-                await upload_images_to_telegram(
-                    api, gm.chat_id, image_ids,
-                    image_base_url=config.image_base_url,
-                    http_client=api._http_client,
-                )
 
             await store.append(gm.chat_id, gm.user_id, "user", user_text)
             await store.append(gm.chat_id, gm.user_id, "assistant", truncated)
