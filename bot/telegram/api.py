@@ -1,5 +1,8 @@
 from __future__ import annotations
 import httpx
+import logging
+
+log = logging.getLogger("tgbot.api")
 
 
 class TelegramError(Exception):
@@ -7,9 +10,17 @@ class TelegramError(Exception):
 
 
 class TelegramApi:
-    def __init__(self, token: str, http_client: httpx.AsyncClient | None = None):
+    def __init__(self, token: str, http_client: httpx.AsyncClient | None = None,
+                 config: object | None = None):
         self._base = f"https://api.telegram.org/bot{token}"
-        self._client = http_client or httpx.AsyncClient(timeout=30)
+        self._client = http_client
+        self._config = config
+
+    @property
+    def _http_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=30)
+        return self._client
 
     async def call(self, method: str, **params) -> object:
         if "chat_id" in params:
@@ -18,7 +29,7 @@ class TelegramApi:
             params["draft_id"] = int(params["draft_id"])
         payload = {k: v for k, v in params.items() if v is not None}
         try:
-            resp = await self._client.post(f"{self._base}/{method}", json=payload)
+            resp = await self._http_client.post(f"{self._base}/{method}", json=payload)
         except httpx.HTTPError as e:
             raise TelegramError(f"{method} request failed: {e}") from e
         data = resp.json()
@@ -78,8 +89,6 @@ class TelegramApi:
     async def send_message(self, chat_id: int, text: str) -> object:
         return await self.call("sendMessage", chat_id=chat_id, text=text)
 
-
-
     async def send_rich_message_draft(self, chat_id: int, draft_id: int, text: str):
         return await self.call("sendRichMessageDraft",
                                 chat_id=chat_id,
@@ -92,4 +101,4 @@ class TelegramApi:
                                                  "business_connection", "business_message"])
 
     async def close(self) -> None:
-        await self._client.aclose()
+        await self._http_client.aclose()

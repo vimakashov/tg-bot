@@ -36,7 +36,7 @@ async def dispatch(update: dict, api, ai, store, config) -> None:
 def build_app(config: Config) -> web.Application:
     store = MemoryStore(config.db_path)
     ai = GroqClient(config.groq_api_key, config.groq_model, config.ai_base_url)
-    api = TelegramApi(config.bot_token)
+    api = TelegramApi(config.bot_token, config=config)
 
     async def handler(update: dict) -> None:
         await dispatch(update, api, ai, store, config)

@@ -59,3 +59,14 @@ def test_missing_required_raises():
     with pytest.raises(MissingConfig) as e:
         Config.from_env(env)
     assert "BOT_TOKEN" in str(e.value)
+
+
+def test_image_base_url_default():
+    cfg = Config.from_env(_base_env())
+    assert cfg.image_base_url == ""
+
+
+def test_image_base_url_override():
+    env = _base_env() | {"IMAGE_BASE_URL": "https://images.example.com/api"}
+    cfg = Config.from_env(env)
+    assert cfg.image_base_url == "https://images.example.com/api"

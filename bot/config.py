@@ -39,6 +39,7 @@ class Config:
     stream_interval: float = 1.0
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     business_system_prompt: str = DEFAULT_BUSINESS_SYSTEM_PROMPT
+    image_base_url: str = ""
 
     @staticmethod
     def from_env(env: dict | None = None) -> "Config":
@@ -62,4 +63,5 @@ class Config:
             stream_interval=float(env.get("STREAM_INTERVAL", "1.0")),
             system_prompt=env.get("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT),
             business_system_prompt=env.get("BUSINESS_SYSTEM_PROMPT", DEFAULT_BUSINESS_SYSTEM_PROMPT),
+            image_base_url=env.get("IMAGE_BASE_URL", ""),
         )

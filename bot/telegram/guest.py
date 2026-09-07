@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 
 from bot.telegram.api import TelegramError
+from bot.telegram.images import parse_images, resolve_image_urls
 
 log = logging.getLogger("tgbot.guest")
 
@@ -81,24 +82,36 @@ async def stream_guest_reply(gm: GuestMessage, api, ai, store, config) -> None:
     user_text = strip_bot_mention(gm.text, config.bot_username)
     history = await store.get_history(gm.chat_id, gm.user_id, config.context_messages)
     messages = build_messages(history, user_text, gm.reply_text, config.system_prompt)
-    
+
     full_text = ""
-    
+
     try:
         async for chunk in ai.stream_completion(messages):
             full_text += chunk
-        
+
         if full_text.strip():
-            # For Guest Mode, we must use answer_guest_query with the full text.
-            # We cannot stream edits because Guest Mode doesn't support them.
-            truncated = full_text[:TELEGRAM_MAX]
+            # Parse image placeholders from the response text.
+            clean_text, image_ids = parse_images(full_text)
+            truncated = clean_text[:TELEGRAM_MAX]
+
+            # Resolve image URLs and append to text before sending.
+            if image_ids:
+                resolved = await resolve_image_urls(
+                    image_ids,
+                    image_base_url=config.image_base_url,
+                    http_client=api._http_client,
+                )
+                if resolved:
+                    truncated = truncated.rstrip() + "\n\n".join(f"![{i+1}]({url})" for i, url in enumerate(resolved))
+
             try:
                 await api.answer_guest_query(gm.query_id, truncated)
             except TelegramError:
                 await api.answer_guest_query(gm.query_id, truncated, rich=False)
+
             await store.append(gm.chat_id, gm.user_id, "user", user_text)
             await store.append(gm.chat_id, gm.user_id, "assistant", truncated)
-        
+
     except Exception as e:
         log.exception("Guest reply failed: %s", e)
         if full_text:

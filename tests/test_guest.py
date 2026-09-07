@@ -97,6 +97,42 @@ class FakeApi:
         self.answers = []      # (guest_query_id, text) for each successful answer
         self.rich_flags = []   # the `rich` value passed on each call, in order
         self._rich_error = rich_error
+        # Image support tracking: tracks sendMessage calls made by images module
+        self.image_messages = []  # list of (chat_id, text) sent via sendMessage
+        # http_client stub for image resolution
+        import unittest.mock
+        self._http_client = unittest.mock.AsyncMock()
+        self._http_client.get = unittest.mock.AsyncMock(
+            side_effect=lambda url: _mock_image_response(url)
+        )
+
+
+import unittest.mock
+
+
+def _mock_image_response(url):
+    """Return a mock httpx.Response with thumbnail for the given image URL."""
+    # Extract image_id from URL like "http://test.example.com/images/abc123.json"
+    parts = url.rstrip("/").split("/")
+    image_id = parts[-1].replace(".json", "")
+    mock_resp = unittest.mock.MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"thumbnail": f"https://cdn.example.com/{image_id}.jpg"}
+    return mock_resp
+
+
+class FakeApi:
+    def __init__(self, rich_error=None):
+        self.answers = []      # (guest_query_id, text) for each successful answer
+        self.rich_flags = []   # the `rich` value passed on each call, in order
+        self._rich_error = rich_error
+        # Image support tracking: resolved URLs appended to text
+        self.image_urls = []  # list of all resolved image URLs
+        # http_client stub for image resolution
+        self._http_client = unittest.mock.MagicMock()
+        self._http_client.get = unittest.mock.AsyncMock(
+            side_effect=_mock_image_response
+        )
 
     async def answer_guest_query(self, guest_query_id, text, rich=True):
         self.rich_flags.append(rich)
@@ -110,6 +146,7 @@ class Cfg:
     context_messages = 10
     stream_interval = 0.0
     system_prompt = TEST_PROMPT
+    image_base_url = "http://test.example.com/images"
 
 
 async def test_handler_accumulates_and_answers_once():
@@ -156,3 +193,35 @@ async def test_handler_falls_back_to_plain_on_rich_rejection():
     # the reply still reached the user, and history was persisted
     assert api.answers == [("q1", "**Hi**")]
     assert store.appended == [("user", "hi"), ("assistant", "**Hi**")]
+
+
+async def test_handler_sends_clean_text_and_triggers_image_upload():
+    """When response contains [[img:id]] placeholders, text is cleaned and image URLs are appended."""
+    store, ai = FakeStore(), FakeAI(["Photo: [[img:abc123]]"])
+    api = FakeApi()
+    await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
+
+    # Clean text sent with image URL appended (as markdown link)
+    qid, text = api.answers[0]
+    assert "Photo:" in text  # placeholder removed, no trailing space
+    assert "https://cdn.example.com/abc123.jpg" in text
+
+
+async def test_handler_no_image_upload_when_no_placeholders():
+    """When response has no placeholders, no image URL is appended."""
+    store, ai = FakeStore(), FakeAI(["Hello world"])
+    api = FakeApi()
+    await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
+
+    assert api.answers == [("q1", "Hello world")]
+
+
+async def test_handler_sends_multiple_images():
+    """Multiple image placeholders trigger multiple URL appends."""
+    store, ai = FakeStore(), FakeAI("[[img:first]] and [[img:second]]")
+    api = FakeApi()
+    await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
+
+    qid, text = api.answers[0]
+    assert "https://cdn.example.com/first.jpg" in text
+    assert "https://cdn.example.com/second.jpg" in text
