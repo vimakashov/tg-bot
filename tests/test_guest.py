@@ -97,12 +97,23 @@ class FakeApi:
         self.answers = []      # (guest_query_id, text) for each successful answer
         self.rich_flags = []   # the `rich` value passed on each call, in order
         self._rich_error = rich_error
+        # Image support tracking
+        self.resolve_called = []    # list of image_ids resolved
+        self.upload_calls = []      # list of (chat_id, url, business_connection_id)
 
     async def answer_guest_query(self, guest_query_id, text, rich=True):
         self.rich_flags.append(rich)
         if rich and self._rich_error:
             raise self._rich_error
         self.answers.append((guest_query_id, text))
+
+    async def resolve_image_url(self, image_id):
+        self.resolve_called.append(image_id)
+        return f"https://cdn.example.com/{image_id}.jpg"
+
+    async def upload_photo_from_url(self, chat_id, url, business_connection_id=None):
+        self.upload_calls.append((chat_id, url, business_connection_id))
+        return f"file_{url.split('/')[-1]}"
 
 
 class Cfg:
@@ -156,3 +167,43 @@ async def test_handler_falls_back_to_plain_on_rich_rejection():
     # the reply still reached the user, and history was persisted
     assert api.answers == [("q1", "**Hi**")]
     assert store.appended == [("user", "hi"), ("assistant", "**Hi**")]
+
+
+async def test_handler_sends_clean_text_and_triggers_image_upload():
+    """When response contains [[img:id]] placeholders, text is cleaned and images are uploaded."""
+    store, ai = FakeStore(), FakeAI(["Photo: [[img:abc123]]"])
+    api = FakeApi()
+    await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
+
+    # Clean text sent (placeholder removed)
+    assert api.answers == [("q1", "Photo: ")]
+
+    # Image upload was triggered
+    assert api.resolve_called == ["abc123"]
+    assert len(api.upload_calls) == 1
+    chat_id, url, conn_id = api.upload_calls[0]
+    assert chat_id == 42  # from _update fixture
+    assert "abc123" in url
+    assert conn_id is None  # guest mode has no business_connection_id
+
+
+async def test_handler_no_image_upload_when_no_placeholders():
+    """When response has no placeholders, no image upload is triggered."""
+    store, ai = FakeStore(), FakeAI(["Hello world"])
+    api = FakeApi()
+    await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
+
+    assert api.answers == [("q1", "Hello world")]
+    assert api.resolve_called == []
+    assert api.upload_calls == []
+
+
+async def test_handler_sends_multiple_images():
+    """Multiple image placeholders trigger multiple uploads."""
+    store, ai = FakeStore(), FakeAI("[[img:first]] and [[img:second]]")
+    api = FakeApi()
+    await handle_guest_message(_update("@testbot hi"), api, ai, store, Cfg())
+
+    assert api.answers == [("q1", " and ")]
+    assert api.resolve_called == ["first", "second"]
+    assert len(api.upload_calls) == 2
