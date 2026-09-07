@@ -100,7 +100,11 @@ async def stream_guest_reply(gm: GuestMessage, api, ai, store, config) -> None:
 
             # Upload any images referenced in the response.
             if image_ids:
-                await upload_images_to_telegram(api, gm.chat_id, image_ids)
+                await upload_images_to_telegram(
+                    api, gm.chat_id, image_ids,
+                    image_base_url=config.image_base_url,
+                    http_client=api._http_client,
+                )
 
             await store.append(gm.chat_id, gm.user_id, "user", user_text)
             await store.append(gm.chat_id, gm.user_id, "assistant", truncated)

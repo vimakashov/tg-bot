@@ -49,9 +49,14 @@ class FakeApi:
         self.plain_sent = []   # every plain attempt
         self._error = error
         self._rich_error = rich_error
-        # Image support tracking
-        self.resolve_called = []    # list of image_ids resolved
-        self.upload_calls = []      # list of (chat_id, url, business_connection_id)
+        # Image support tracking: tracks sendMessage calls made by images module
+        self.image_messages = []  # list of (chat_id, text) sent via sendMessage
+        # http_client stub for image resolution
+        import unittest.mock
+        self._http_client = unittest.mock.MagicMock()
+        self._http_client.get = unittest.mock.AsyncMock(
+            side_effect=_mock_image_response
+        )
 
     async def send_rich_business_message(self, business_connection_id, chat_id, text):
         self.rich_sent.append((business_connection_id, chat_id, text))
@@ -65,13 +70,23 @@ class FakeApi:
             raise self._error
         self.sent.append((business_connection_id, chat_id, text))
 
-    async def resolve_image_url(self, image_id):
-        self.resolve_called.append(image_id)
-        return f"https://cdn.example.com/{image_id}.jpg"
+    async def call(self, method, **kwargs):
+        if method == "sendMessage":
+            chat_id = kwargs.get("chat_id")
+            text = kwargs.get("text", "")
+            self.image_messages.append((chat_id, text))
 
-    async def upload_photo_from_url(self, chat_id, url, business_connection_id=None):
-        self.upload_calls.append((chat_id, url, business_connection_id))
-        return f"file_{url.split('/')[-1]}"
+
+def _mock_image_response(url):
+    """Return a mock httpx.Response with thumbnail for the given image URL."""
+    import unittest.mock
+    # Extract image_id from URL like "http://test.example.com/images/abc123.json"
+    parts = url.rstrip("/").split("/")
+    image_id = parts[-1].replace(".json", "")
+    mock_resp = unittest.mock.MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"thumbnail": f"https://cdn.example.com/{image_id}.jpg"}
+    return mock_resp
 
 
 BUSINESS_PROMPT = "Reply as the owner."
@@ -80,6 +95,7 @@ BUSINESS_PROMPT = "Reply as the owner."
 class Cfg:
     context_messages = 10
     business_system_prompt = BUSINESS_PROMPT
+    image_base_url = "http://test.example.com/images"
 
 
 def _enabled_conn(owner_id=555):
@@ -267,7 +283,7 @@ async def test_business_truncates_to_4096():
 
 
 async def test_business_handler_sends_clean_text_and_triggers_image_upload():
-    """When response contains [[img:id]] placeholders, text is cleaned and images are uploaded with business_connection_id."""
+    """When response contains [[img:id]] placeholders, text is cleaned and image URLs are sent."""
     store = FakeStore(connection=_enabled_conn())
     ai, api = FakeAI(["Photo: [[img:def456]]"]), FakeApi()
     await handle_business_message(_msg_update(from_id=999, text="hi"), api, ai, store, Cfg())
@@ -275,21 +291,18 @@ async def test_business_handler_sends_clean_text_and_triggers_image_upload():
     # Clean text sent (placeholder removed)
     assert api.sent == [("conn1", 999, "Photo: ")]
 
-    # Image upload was triggered with business_connection_id
-    assert api.resolve_called == ["def456"]
-    assert len(api.upload_calls) == 1
-    chat_id, url, conn_id = api.upload_calls[0]
+    # Image URL sent as a separate message via sendMessage
+    assert len(api.image_messages) == 1
+    chat_id, url = api.image_messages[0]
     assert chat_id == 999
     assert "def456" in url
-    assert conn_id == "conn1"
 
 
 async def test_business_no_image_upload_when_no_placeholders():
-    """When response has no placeholders, no image upload is triggered."""
+    """When response has no placeholders, no image URL message is triggered."""
     store = FakeStore(connection=_enabled_conn())
     ai, api = FakeAI(["Hello world"]), FakeApi()
     await handle_business_message(_msg_update(from_id=999, text="hi"), api, ai, store, Cfg())
 
     assert api.sent == [("conn1", 999, "Hello world")]
-    assert api.resolve_called == []
-    assert api.upload_calls == []
+    assert api.image_messages == []

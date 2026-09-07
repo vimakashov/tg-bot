@@ -138,7 +138,10 @@ async def handle_business_message(update: dict, api, ai, store, config) -> None:
     # Upload any images referenced in the response.
     if image_ids:
         await upload_images_to_telegram(
-            api, bm.chat_id, image_ids, business_connection_id=bm.connection_id
+            api, bm.chat_id, image_ids,
+            business_connection_id=bm.connection_id,
+            image_base_url=config.image_base_url,
+            http_client=api._http_client,
         )
 
     # Persist only on a successful send (mirrors the guest path).
